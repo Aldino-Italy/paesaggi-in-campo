@@ -766,31 +766,35 @@ function controlloView() {
   const verdict = el("div", { cls: "card", style: "text-align:center" }); p.append(verdict);
   const exSel = store.get("controlloEx", cur.exId || "vajont");
   const row = (ok, title, detail, action) => el("div", { cls: "row", style: "padding:10px 0;border-bottom:1px solid var(--line);align-items:flex-start" }, el("span", { style: "width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;background:" + (ok === true ? "var(--ok)" : ok === false ? "var(--red)" : "var(--warn)") }, ok === true ? "✓" : ok === false ? "!" : "?"), el("div", { cls: "grow" }, el("b", null, title), el("div", { cls: "small muted" }, detail), action || null));
+  let drawGen = 0;
   async function draw() {
-    box.innerHTML = "";
-    box.append(el("div", { cls: "tabs" }, ...["vajont", "carso"].map(k => el("button", { cls: k === store.get("controlloEx", exSel) ? "on" : "", on: { click: () => { store.set("controlloEx", k); draw(); } } }, EX[k].title))));
+    const gen = ++drawGen; const out = el("div");
+    out.append(el("div", { cls: "tabs" }, ...["vajont", "carso"].map(k => el("button", { cls: k === store.get("controlloEx", exSel) ? "on" : "", on: { click: () => { store.set("controlloEx", k); draw(); } } }, EX[k].title))));
     const exk = EX[store.get("controlloEx", exSel)];
     const res = {};
     // 1. installazione
     res.inst = isStandalone() || !isMobile();
-    box.append(row(isStandalone() ? true : (isMobile() ? false : null), "App installata", isStandalone() ? "L'app è aperta dall'icona, a schermo intero." : isMobile() ? "Stai usando il browser. Installa l'app, poi aprila dall'icona e rifai il controllo." : "Su computer l'installazione è facoltativa.", isStandalone() ? null : el("a", { cls: "btn sm primary", href: "#/installa", style: "margin-top:6px" }, "Come si installa")));
+    out.append(row(isStandalone() ? true : (isMobile() ? false : null), "App installata", isStandalone() ? "L'app è aperta dall'icona, a schermo intero." : isMobile() ? "Stai usando il browser. Installa l'app, poi aprila dall'icona e rifai il controllo." : "Su computer l'installazione è facoltativa.", isStandalone() ? null : el("a", { cls: "btn sm primary", href: "#/installa", style: "margin-top:6px" }, "Come si installa")));
     // 2. posizione
     let geo = "prompt"; try { if (navigator.permissions) geo = (await navigator.permissions.query({ name: "geolocation" })).state; } catch (e) {}
+    if (gen !== drawGen) return;
     if (Geo.pos) geo = "granted";
     res.geo = geo === "granted";
-    box.append(row(geo === "granted" ? true : geo === "denied" ? false : null, "Posizione", geo === "granted" ? (Geo.pos ? "Attiva, precisione ± " + Math.round(Geo.acc) + " m." : "Permesso concesso.") : geo === "denied" ? "Permesso negato: va riattivato nelle impostazioni del telefono (vedi «Come si installa», ultima sezione)." : "Non ancora concessa.", geo === "granted" ? null : el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: () => { Geo.start(); const off = Geo.on(() => { if (Geo.pos || Geo.err) { off(); draw(); } }); } } }, "Consenti la posizione")));
+    out.append(row(geo === "granted" ? true : geo === "denied" ? false : null, "Posizione", geo === "granted" ? (Geo.pos ? "Attiva, precisione ± " + Math.round(Geo.acc) + " m." : "Permesso concesso.") : geo === "denied" ? "Permesso negato: va riattivato nelle impostazioni del telefono (vedi «Come si installa», ultima sezione)." : "Non ancora concessa.", geo === "granted" ? null : el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: () => { Geo.start(); const off = Geo.on(() => { if (Geo.pos || Geo.err) { off(); draw(); } }); } } }, "Consenti la posizione")));
     // 3. bussola
     const hasHead = Geo.compass != null;
-    box.append(row(hasHead ? true : null, "Bussola", hasHead ? "Funziona: direzione " + fmtAz(Geo.compass) + "." : "Serve al mirino del paesaggio. Tocca il pulsante e ruota il telefono; alcuni tablet non hanno il sensore.", hasHead ? null : el("button", { cls: "btn sm", style: "margin-top:6px", on: { click: () => { Geo.startCompass(); setTimeout(draw, 2500); } } }, "Prova la bussola")));
+    out.append(row(hasHead ? true : null, "Bussola", hasHead ? "Funziona: direzione " + fmtAz(Geo.compass) + "." : "Serve al mirino del paesaggio. Tocca il pulsante e ruota il telefono; alcuni tablet non hanno il sensore.", hasHead ? null : el("button", { cls: "btn sm", style: "margin-top:6px", on: { click: () => { Geo.startCompass(); setTimeout(draw, 2500); } } }, "Prova la bussola")));
     // 4. contenuti offline
-    const st = await Offline.status(exk); const pct = Math.round(st.done / st.total * 100);
+    const st = await Offline.status(exk); if (gen !== drawGen) return; const pct = Math.round(st.done / st.total * 100);
     res.off = pct >= 97;
     const bar = el("div", { cls: "progress", style: "margin-top:6px" }, el("i", { style: "width:" + pct + "%" }));
     const btn = el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: async () => { btn.disabled = true; btn.textContent = "Scaricamento…"; await Offline.prefetch(exk, (n, t) => { bar.firstChild.style.width = Math.round(n / t * 100) + "%"; btn.textContent = "Scaricamento… " + Math.round(n / t * 100) + "%"; }); draw(); } } }, pct > 0 ? "Completa lo scaricamento" : "Scarica carte e figure");
-    box.append(row(res.off, "Carte e figure senza rete, " + exk.title, pct + "% scaricato (" + st.done + " di " + st.total + " elementi, circa 20 MB). Meglio con il Wi-Fi.", el("div", null, bar, res.off ? null : btn)));
+    out.append(row(res.off, "Carte e figure senza rete, " + exk.title, pct + "% scaricato (" + st.done + " di " + st.total + " elementi, circa 20 MB). Meglio con il Wi-Fi.", el("div", null, bar, res.off ? null : btn)));
     // 5. memoria
     let pers = null; try { if (navigator.storage && navigator.storage.persisted) pers = await navigator.storage.persisted(); } catch (e) {}
-    box.append(row(pers === true ? true : null, "Memoria protetta", pers ? "Il telefono non cancellerà i contenuti scaricati." : "Il browser decide da solo; su iPhone la protezione vale per l'app installata.", null));
+    if (gen !== drawGen) return;
+    out.append(row(pers === true ? true : null, "Memoria protetta", pers ? "Il telefono non cancellerà i contenuti scaricati." : "Il browser decide da solo; su iPhone la protezione vale per l'app installata.", null));
+    box.replaceChildren(...out.childNodes);
     const ready = res.geo && res.off && (isStandalone() || !isMobile());
     verdict.innerHTML = "";
     verdict.style.background = ready ? "var(--ok)" : "var(--card)"; verdict.style.color = ready ? "#fff" : "";
