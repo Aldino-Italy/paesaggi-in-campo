@@ -137,7 +137,7 @@ $("#btnGps").addEventListener("click", () => { if (Geo.active()) { Geo.stop(); t
 function setNav(exId, page) {
   document.querySelectorAll("#nav a").forEach(a => {
     const t = a.dataset.tab; a.classList.toggle("on", t === page || (t === "home" && page === "home" && !exId) || (t === "tappe" && (page === "tappa" || page === "finestrino")) || (t === "guida" && ["figure", "glossario", "domande", "testi", "cronologia"].includes(page)) || (t === "altro" && ["taccuino", "docente", "info", "controllo", "installa"].includes(page)));
-    if (t !== "home") a.href = exId ? "#/" + exId + "/" + t : "#/";
+    if (t !== "home") a.href = exId ? "#/" + exId + "/" + t : (t === "altro" ? "#/altro" : "#/");
   });
 }
 function setTitle(t, s) { $("#ttl").textContent = t; $("#sub").textContent = s || ""; }
