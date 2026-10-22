@@ -107,6 +107,7 @@ window.DATA.installa = {
       { t: "In alternativa: menu **⋮** › **«Trasmetti, salva e condividi»** › **«Installa Paesaggi in campo…»**.", img: "img/guida/chrome_3.jpg", src: "Google Chrome 156, schermata reale" }
     ],
     note: "L'app si apre in una finestra propria e compare tra i programmi del computer.",
+    after: { img: "img/guida/chrome_4.jpg", cap: "L'app installata, nella sua finestra" },
     src: "Google Chrome 156 in italiano"
   },
   "desktop-edge": {
@@ -114,8 +115,10 @@ window.DATA.installa = {
     steps: [
       { t: "Nella barra degli indirizzi fai clic sull'icona **«App disponibile. Installa Paesaggi in campo»**.", img: "img/guida/edge_1.jpg", src: "Microsoft Edge 155, schermata reale" },
       { t: "Nella finestra **«Installa l'app Paesaggi in campo»** fai clic su **«Installa»**.", img: "img/guida/edge_2.jpg", src: "Microsoft Edge 155, schermata reale" },
-      { t: "In alternativa: **…** (Impostazioni e altro) › **«Altri strumenti»** › **«App»** › **«Installa Paesaggi in campo»**.", img: "img/guida/edge_3.jpg", src: "Microsoft Edge 155, schermata reale" }
+      { t: "In alternativa: **…** (Impostazioni e altro) › **«Altri strumenti»** › **«App»** › **«Installa Paesaggi in campo»**.", img: "img/guida/edge_3.jpg", src: "Microsoft Edge 155, schermata reale" },
+      { t: "Alla prima apertura, nel «Controllo di partenza», alla richiesta della posizione fai clic su **«Consenti»**.", img: "img/guida/edge_5.jpg", src: "Microsoft Edge 155, schermata reale" }
     ],
+    after: { img: "img/guida/edge_6.jpg", cap: "Il Controllo di partenza completato" },
     src: "Microsoft Edge 155 in italiano"
   },
   "mac-safari": {

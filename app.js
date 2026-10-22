@@ -837,6 +837,7 @@ function guideBlock(g, open) {
     ol.append(li);
   });
   body.append(ol);
+  if (g.after) body.append(el("div", { cls: "figinline" }, el("img", { src: g.after.img, loading: "lazy", alt: "", style: "border-radius:10px;border:1px solid var(--line);cursor:zoom-in", on: { click: () => Viewer.open(g.after.img, g.after.cap, "schermata reale") } }), el("div", { cls: "cap" }, g.after.cap)));
   if (g.note) body.append(el("p", { cls: "small muted", style: "margin-top:6px", html: md(g.note) }));
   if (g.src) body.append(el("p", { cls: "small muted", style: "margin:0" }, "Verificato su: " + g.src));
   return el("details", open ? { open: "" } : null, el("summary", null, g.name), body);
