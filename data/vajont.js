@@ -246,9 +246,11 @@ window.DATA.vajont = {
     "I livelli argillosi della Formazione di Fonzaso sono spessi al massimo 18 cm. Come possono governare il movimento di 270 milioni di m³ di roccia?",
     "Che cosa dimostra il Colle Isolato, e perché la sua scoperta nel 1959 avrebbe dovuto cambiare la valutazione del versante sinistro?",
     "Quali forme glaciali si conservano nella valle e perché sono state protette proprio dalle frane?",
-    "Nel grafico degli invasi, in quali fasi i movimenti si fermano, e perché?",
+    "Nel grafico del serbatoio 1960-1963 (Cronologia), in quali fasi i movimenti si fermano, e perché?",
     "Il modello di Ghetti indicava 700 m come quota di assoluta sicurezza. Quali ipotesi del modello si sono rivelate sbagliate?",
+    "Sull'accumulo, in quale blocco la stratificazione è ancora riconoscibile, e dove stava quel blocco sulla parete prima del 1963?",
     "Perché la valle del Massalezza è oggi in posizione suborizzontale e spostata di 400 m verso nord?",
+    "Che cosa è cambiato nel livello di base del bacino superiore dopo il 1963, e che effetti si leggono nelle valli del Mesazzo e dello Zemola?",
     "Dal piazzale di Longarone, che cosa era visibile della struttura del versante prima del 1963 e che cosa invece non lo era?"
   ],
 

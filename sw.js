@@ -1,6 +1,6 @@
 /* Paesaggi in campo. Service worker: guscio dell'app precaricato, figure e tessere di carta salvate quando vengono viste
    o quando l'utente le scarica in blocco da «Prepara l'uso offline». */
-const V = "v1.2.2";
+const V = "v1.2.3";
 const SHELL = "pic-shell-" + V, TILES = "pic-tiles-v1", IMGS = "pic-imgs-v1";
 const SHELL_FILES = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "data/vajont.js", "data/carso.js", "data/routes.js", "data/installa.js",
   "vendor/leaflet.js", "vendor/leaflet.css", "vendor/images/marker-icon.png", "vendor/images/marker-icon-2x.png", "vendor/images/marker-shadow.png", "vendor/images/layers.png", "vendor/images/layers-2x.png",
