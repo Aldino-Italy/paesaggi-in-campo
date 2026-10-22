@@ -57,14 +57,18 @@ window.DATA.installa = {
   },
   "android-chrome": {
     name: "Android, Chrome",
+    lead: "Passaggi e schermate verificati su uno smartphone Samsung con Chrome. Su Samsung, Xiaomi, Pixel e sugli altri telefoni Android Chrome si comporta allo stesso modo.",
     steps: [
-      { t: "Apri il link dell'app in **Chrome**. Se in basso compare la barra **«Installa app»**, toccala e passa al punto 4." },
-      { t: "Tocca **⋮** (Altro), in alto a destra." },
-      { t: "Tocca la voce di installazione: **«Installa app»**; nelle versioni più recenti la voce può chiamarsi **«Installa e crea scorciatoia»**." },
-      { t: "Nella finestra di conferma tocca **«Installa»** (non «Crea scorciatoia», che apre il sito nel browser)." },
-      { t: "Apri l'app dall'icona «Paesaggi» nella schermata Home o nell'elenco delle app." }
+      { t: "Apri il link dell'app in **Chrome** e tocca i tre puntini **⋮** in alto a destra, accanto all'indirizzo.", img: "img/guida/and_1.jpg", src: "schermata reale, Chrome per Android" },
+      { t: "Fai scorrere il menu verso l'alto e tocca **«Installa e crea scorciatoia»**.", img: "img/guida/and_2.jpg", src: "schermata reale, Chrome per Android" },
+      { t: "Nel pannello che si apre tocca **«Installa»** (non «Crea scorciatoia», che apre il sito dentro Chrome).", img: "img/guida/and_3.jpg", src: "schermata reale, Chrome per Android" },
+      { t: "Nella finestra **«Installa app»** tocca **«Installa»**.", img: "img/guida/and_4.jpg", src: "schermata reale, Chrome per Android" },
+      { t: "Nella schermata Home compare l'icona **«Paesaggi»**: da ora apri l'app sempre da qui, non da Chrome.", img: "img/guida/and_5.jpg", src: "schermata reale, Android" },
+      { t: "Nell'app apri **Altro › Controllo di partenza** e tocca **«Consenti la posizione»**. Lascia **«Precisa»** e tocca **«Consenti durante la visita al sito»**.", img: "img/guida/and_6.jpg", src: "schermata reale, Chrome per Android" },
+      { t: "Tocca **«Scarica carte e figure»** e aspetta il 100%. Il riquadro verde **«Pronto per l'escursione»** è la schermata da mostrare al docente.", img: "img/guida/and_7.jpg", src: "schermata reale, Android" }
     ],
-    src: "support.google.com/chrome, piattaforma Android (hl=it), e stringhe italiane di Chromium"
+    note: "Se il Controllo di partenza dice «Stai usando il browser», hai aperto la pagina in Chrome invece che dall'icona: chiudi Chrome e apri l'app dall'icona «Paesaggi».",
+    src: "smartphone Samsung con Chrome, schermate reali; voci confermate dalla Guida di Chrome (hl=it)"
   },
   "android-samsung": {
     name: "Android, Samsung Internet",
