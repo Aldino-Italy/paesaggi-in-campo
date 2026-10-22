@@ -190,7 +190,7 @@ function home() {
     p.append(el("a", { cls: "hero", href: "#/" + k, style: "display:block;text-decoration:none" }, el("img", { src: ex.cover, alt: "" }), el("div", { cls: "txt" }, el("b", null, ex.title), el("span", null, ex.subtitle))));
   }
   p.append(el("div", { cls: "card" }, el("h3", null, "Prima di partire"),
-    el("ol", { cls: "small", style: "padding-left:1.2em;margin:0 0 10px" }, el("li", null, "Installa l'app sul telefono o sul tablet seguendo le istruzioni per il tuo browser."), el("li", null, "Aprila dall'icona e fai il «Controllo di partenza»: consenti la posizione e scarica carte e figure per l'uso senza rete."), el("li", null, "Il giorno dell'escursione mostra al docente la schermata verde del controllo.")),
+    el("ol", { cls: "small", style: "padding-left:1.2em;margin:0 0 10px" }, el("li", null, "Installa l'app sul telefono o sul tablet seguendo le istruzioni per il tuo browser."), el("li", null, "Aprila dall'icona e fai il «Controllo di partenza»: consenti la posizione e scarica carte e figure per l'uso senza rete."), el("li", null, "Quando il riquadro in fondo al controllo è verde, il telefono è pronto per l'escursione.")),
     el("div", { cls: "row wrap" }, el("a", { cls: "btn sm primary", href: "#/installa" }, "Come si installa"), el("a", { cls: "btn sm", href: "#/controllo" }, "Controllo di partenza"))));
   p.append(el("p", { cls: "small muted" }, "Testi e figure dalle guide dell'escursione (A. Bondesan). Le fonti sono indicate in ogni didascalia. Cartografia di base © OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)."));
 }
@@ -631,8 +631,10 @@ const MapCtl = {
     else if (arg) { const s = ex.stops.find(x => x.id === arg); if (s) { this.map.setView(s.coords, ex.id === "vajont" ? 15 : 14); this.openStop(ex, s); } }
     else if (this.exId !== ex.id || !this.map._loaded) this.map.setView(ex.center, ex.zoom);
     this.exId = ex.id;
+    this.hookGoto();
     this.bindGeo();
   },
+  hookGoto() { if (this._hk) return; this._hk = true; window.addEventListener("pic-goto", e => { const [la, lo, z] = e.detail; this.map && this.map.setView([la, lo], z); }); },
   detach() { if (this.wrap && this.wrap.parentNode) this.wrap.remove(); if (this.offGeo) { this.offGeo(); this.offGeo = null; } },
   styleFor(ex, k) {
     const lg = ex.legend.find(l => l.k === k); if (!lg) return {}; const [kind, rest] = lg.style.split(":"); const [col, ...mods] = rest.split(";");
@@ -644,7 +646,19 @@ const MapCtl = {
     const m = this.map;
     Object.values(this.layers).forEach(l => m.removeLayer(l)); this.layers = {}; this.overlays = {};
     // itinerario
-    const rt = D.routes && D.routes[ex.id]; if (rt) this.layers.route = L.polyline(rt.coords, { color: "#9c5b4b", weight: 3, opacity: 0.7, dashArray: "2 8" }).addTo(m);
+    // itinerario reale, tratto per tratto, sulla geometria stradale completa
+    const rt = D.routes && D.routes[ex.id];
+    if (rt) {
+      const g = L.featureGroup();
+      const sty = { andata: { color: "#5b2a86", weight: 4.5, opacity: 0.95 }, rientro: { color: "#5b2a86", weight: 3.5, opacity: 0.75, dashArray: "10 9" }, piedi: { color: "#1b7f3b", weight: 5, opacity: 0.95, dashArray: "1 9", lineCap: "round" } };
+      rt.legs.forEach(lg => {
+        const st = sty[lg.kind] || sty.andata;
+        g.addLayer(L.polyline(lg.coords, { color: "#ffffff", weight: st.weight + 3.5, opacity: 0.85, interactive: false }));
+        const h = Math.floor(lg.min / 60), mm = lg.min % 60;
+        g.addLayer(L.polyline(lg.coords, st).bindPopup("<b class='ttl'>" + esc(lg.label) + "</b>" + String(lg.km).replace(".", ",") + " km, circa " + (h ? h + " h " : "") + mm + " min" + (lg.roads && lg.roads.length ? "<div class='conf'>" + esc(lg.roads.filter(r => /^(A|SS|SR|SP|RA|E)\d|^\d+$/.test(r)).join(" › ")) + "</div>" : "")));
+      });
+      this.layers.route = g.addTo(m);
+    }
     // overlay geologici
     const hidden = store.get("hide." + ex.id, []);
     ex.legend.forEach(lg => {
@@ -682,7 +696,7 @@ const MapCtl = {
     const hidden = store.get("hide." + ex.id, []);
     ex.legend.forEach(l => { const [kind, rest] = l.style.split(":"); const [col, ...mods] = rest.split(";"); const sw = el("span", { cls: "sw " + kind + " " + mods.join(" "), style: kind === "fill" ? "background:" + col + "55;border:1.5px solid " + col : kind === "line" ? "border-color:" + col : "background:" + col }); const li = el("div", { cls: "li" + (hidden.includes(l.k) ? " off" : ""), on: { click: () => { const h = store.get("hide." + ex.id, []); const i = h.indexOf(l.k); if (i >= 0) { h.splice(i, 1); this.overlays[l.k].addTo(this.map); } else { h.push(l.k); this.map.removeLayer(this.overlays[l.k]); } store.set("hide." + ex.id, h); li.classList.toggle("off", i < 0); } } }, sw, el("span", null, l.n)); lg.append(li); });
     lg.append(el("div", { cls: "li" + (store.get("showTargets", true) ? "" : " off"), on: { click: e => { const v = !store.get("showTargets", true); store.set("showTargets", v); if (v) this.layers.targets.addTo(this.map); else this.map.removeLayer(this.layers.targets); e.currentTarget.classList.toggle("off", !v); } } }, el("span", { cls: "sw point", style: "background:#2b3a4a" }), el("span", null, "Bersagli del mirino")));
-    lg.append(el("div", { cls: "li" }, el("span", { cls: "sw line", style: "border-color:#9c5b4b;border-top-style:dotted" }), el("span", null, "Itinerario del pullman")), el("div", { cls: "li" }, el("span", { cls: "marker-stop", style: "width:18px;height:18px;font-size:10px" }, "1"), el("span", null, "Tappe"), el("span", { cls: "marker-stop win", style: "width:18px;height:18px;margin-left:6px" }), el("span", null, "Finestrino")));
+    lg.append(el("div", { cls: "li" }, el("span", { cls: "sw line", style: "border-color:#5b2a86;border-top-width:4px" }), el("span", null, "Itinerario del pullman, andata e trasferimenti")), el("div", { cls: "li" }, el("span", { cls: "sw line dash", style: "border-color:#5b2a86" }), el("span", null, "Rientro a Padova")), ...(ex.id === "vajont" ? [el("div", { cls: "li" }, el("span", { cls: "sw line dashdot", style: "border-color:#1b7f3b;border-top-width:4px" }), el("span", null, "Percorso a piedi, tappe 3-5"))] : []), el("div", { cls: "li" }, el("span", { cls: "marker-stop", style: "width:18px;height:18px;font-size:10px" }, "1"), el("span", null, "Tappe"), el("span", { cls: "marker-stop win", style: "width:18px;height:18px;margin-left:6px" }), el("span", null, "Finestrino")));
     lg.append(el("div", { cls: "muted", style: "margin-top:6px;font-size:.92em" }, "Tocca una voce per nasconderla. Gli overlay sono schematici: tocca un elemento per la precisione."));
     this.legendEl = lg; const bl = el("div", { cls: "mapctl bl" }, lg); this.wrap.append(bl);
     // HUD
@@ -761,7 +775,7 @@ const isStandalone = () => window.matchMedia("(display-mode: standalone)").match
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
 function controlloView() {
   setTitle("Controllo di partenza", "Paesaggi in campo");
-  const p = page(el("p", { cls: "lead" }, "Cinque verifiche da fare a casa, con il Wi-Fi, il giorno prima dell'escursione. Quando tutte le righe sono verdi, mostra questa schermata al docente salendo sul pullman."));
+  const p = page(el("p", { cls: "lead" }, "Cinque verifiche da fare a casa, con il Wi-Fi, il giorno prima dell'escursione. Quando tutte le righe sono verdi, il telefono è pronto e non serve altro."));
   const box = el("div", { cls: "card" }); p.append(box);
   const verdict = el("div", { cls: "card", style: "text-align:center" }); p.append(verdict);
   const exSel = store.get("controlloEx", cur.exId || "vajont");
@@ -871,7 +885,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.1";
+const VERSION = "1.2";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {

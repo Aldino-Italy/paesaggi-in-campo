@@ -65,7 +65,7 @@ window.DATA.installa = {
       { t: "Nella finestra **«Installa app»** tocca **«Installa»**.", img: "img/guida/and_4.jpg", src: "schermata reale, Chrome per Android" },
       { t: "Nella schermata Home compare l'icona **«Paesaggi»**: da ora apri l'app sempre da qui, non da Chrome.", img: "img/guida/and_5.jpg", src: "schermata reale, Android" },
       { t: "Nell'app apri **Altro › Controllo di partenza** e tocca **«Consenti la posizione»**. Lascia **«Precisa»** e tocca **«Consenti durante la visita al sito»**.", img: "img/guida/and_6.jpg", src: "schermata reale, Chrome per Android" },
-      { t: "Tocca **«Scarica carte e figure»** e aspetta il 100%. Il riquadro verde **«Pronto per l'escursione»** è la schermata da mostrare al docente.", img: "img/guida/and_7.jpg", src: "schermata reale, Android" }
+      { t: "Tocca **«Scarica carte e figure»** e aspetta il 100%. Quando compare il riquadro verde **«Pronto per l'escursione»** il telefono è pronto.", img: "img/guida/and_7.jpg", src: "schermata reale, Android" }
     ],
     note: "Se il Controllo di partenza dice «Stai usando il browser», hai aperto la pagina in Chrome invece che dall'icona: chiudi Chrome e apri l'app dall'icona «Paesaggi».",
     src: "smartphone Samsung con Chrome, schermate reali; voci confermate dalla Guida di Chrome (hl=it)"
