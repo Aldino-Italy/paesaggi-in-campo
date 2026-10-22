@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Paesaggi in campo</title>
+<meta name="description" content="Guida di campo interattiva alle escursioni del corso Analisi e interpretazione dei paesaggi naturali: valle del Vajont e Carso Classico.">
+<meta name="theme-color" content="#c00000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Paesaggi">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="top">
+  <button class="iconbtn" id="btnBack" aria-label="Indietro"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <div class="bar"></div>
+  <div class="title"><b id="ttl">Paesaggi in campo</b><span id="sub">DiSSGeA, Università di Padova</span></div>
+  <button class="iconbtn" id="btnGps" aria-label="Posizione" title="Posizione"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg></button>
+</header>
+
+<main id="view"></main>
+
+<nav id="nav">
+  <a href="#/" data-tab="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Inizio</a>
+  <a href="#" data-tab="mappa"><svg viewBox="0 0 24 24"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></svg>Carta</a>
+  <a href="#" data-tab="tappe"><svg viewBox="0 0 24 24"><path d="M12 22s7-7 7-12a7 7 0 0 0-14 0c0 5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>Tappe</a>
+  <a href="#" data-tab="guida"><svg viewBox="0 0 24 24"><path d="M4 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/></svg>Guida</a>
+  <a href="#" data-tab="strumenti"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15.5 8.5l-2.3 5.2-5.2 2.3 2.3-5.2z"/></svg>Strumenti</a>
+  <a href="#" data-tab="altro"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>Altro</a>
+</nav>
+
+<div id="viewer">
+  <div class="vtop">
+    <button class="iconbtn" id="vClose" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="grow small" id="vTitle"></div>
+    <button class="iconbtn" id="vFit" aria-label="Adatta"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+  </div>
+  <div class="stage" id="vStage"><img id="vImg" alt=""></div>
+  <div class="vcap" id="vCap"></div>
+</div>
+
+<div id="toast"></div>
+
+<script src="vendor/leaflet.js"></script>
+<script src="data/vajont.js"></script>
+<script src="data/carso.js"></script>
+<script src="data/routes.js"></script>
+<script src="data/installa.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "Paesaggi in campo",
+  "short_name": "Paesaggi",
+  "description": "Guida di campo interattiva alle escursioni del corso Analisi e interpretazione dei paesaggi naturali: valle del Vajont e Carso Classico.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f4ef",
+  "theme_color": "#c00000",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Vajont", "url": "./#/vajont", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Carso Classico", "url": "./#/carso", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
