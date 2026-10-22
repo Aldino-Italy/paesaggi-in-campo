@@ -860,6 +860,7 @@ function installView() {
     p.append(hd);
     const blk = guideBlock(mine, true); blk.querySelector("summary").textContent = "Passo per passo"; p.append(blk);
   }
+  p.append(el("a", { cls: "btn block", href: "docs/Manuale_installazione.pdf", target: "_blank", rel: "noopener", style: "margin-top:10px", html: SVG.pdf + " Manuale illustrato in PDF" }));
   p.append(el("h3", { style: "margin-top:18px" }, isStandalone() || !mine ? "Istruzioni per ogni browser" : "Altri dispositivi e browser"));
   const order = ["ios-safari", "ipad-safari", "ios-chrome", "ios-edge", "ios-inapp", "android-chrome", "android-samsung", "android-firefox", "android-edge", "android-inapp", "desktop-chrome", "desktop-edge", "mac-safari", "desktop-firefox", "permessi-ios", "permessi-android"];
   order.forEach(k => { if (G[k] && (k !== key || isStandalone())) p.append(guideBlock(G[k], false)); });
