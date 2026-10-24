@@ -64,8 +64,9 @@ const SVG = {
 
 /* ------------------------------------------------------------------ geolocalizzazione */
 const Geo = {
-  pos: null, acc: null, heading: null, speed: null, compass: null, watchId: null, listeners: new Set(), err: null, compassOn: false,
+  pos: null, acc: null, heading: null, speed: null, compass: null, watchId: null, listeners: new Set(), headFns: new Set(), err: null, compassOn: false, compassState: "off", compassAbs: false, _sx: 0, _sy: 0, _emitT: 0,
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+  onHeading(fn) { this.headFns.add(fn); return () => this.headFns.delete(fn); },
   emit() { this.listeners.forEach(f => { try { f(this); } catch (e) { console.error(e); } }); },
   start() {
     if (this.watchId != null || !navigator.geolocation) return;
@@ -79,24 +80,33 @@ const Geo = {
   },
   stop() { if (this.watchId != null) navigator.geolocation.clearWatch(this.watchId); this.watchId = null; $("#btnGps").style.color = ""; this.emit(); },
   active() { return this.watchId != null; },
-  startCompass() {
+  // bussola: le letture (fino a 60 al secondo) vanno solo a chi disegna la direzione; le altre viste si aggiornano al massimo una volta al secondo
+  startCompass(gesture) {
     if (this.compassOn) return;
+    const needPerm = typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function";
+    const tell = () => this.headFns.forEach(f => { try { f(this); } catch (err) { console.error(err); } });
+    const setState = st => { this.compassState = st; tell(); };
     const go = () => {
-      this.compassOn = true;
+      if (this.compassOn) return; this.compassOn = true; setState("wait");
       const h = e => {
         let hd = null;
-        if (e.webkitCompassHeading != null) hd = e.webkitCompassHeading;
-        else if (e.alpha != null && (e.absolute || e.type === "deviceorientationabsolute")) hd = (360 - e.alpha) % 360;
-        if (hd == null) return;
+        if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0) hd = e.webkitCompassHeading;
+        else if (e.alpha != null && (e.type === "deviceorientationabsolute" || e.absolute === true)) hd = (360 - e.alpha) % 360;
+        if (e.type === "deviceorientationabsolute" && e.alpha != null) this.compassAbs = true;
+        if (hd == null) { if (e.alpha != null && this.compassState === "wait") setState("rel"); return; }
         const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-        this.compass = (hd + so + 360) % 360; this.emit();
+        const r = ((hd + so + 360) % 360) * Math.PI / 180;
+        if (this.compass == null) { this._sx = Math.sin(r); this._sy = Math.cos(r); } else { this._sx = this._sx * 0.75 + Math.sin(r) * 0.25; this._sy = this._sy * 0.75 + Math.cos(r) * 0.25; }
+        this.compass = (Math.atan2(this._sx, this._sy) * 180 / Math.PI + 360) % 360; this.compassState = "ok"; tell();
+        const now = Date.now(); if (now - this._emitT > 1000) { this._emitT = now; this.emit(); }
       };
       if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", h, true);
-      else window.addEventListener("deviceorientation", h, true);
+      window.addEventListener("deviceorientation", e => { if (!this.compassAbs) h(e); }, true);
+      setTimeout(() => { if (this.compassState === "wait") setState("none"); }, 4000);
     };
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function")
-      DeviceOrientationEvent.requestPermission().then(s => { if (s === "granted") go(); }).catch(() => {});
-    else go();
+    if (!needPerm) return go();
+    // Chrome concede il permesso anche senza tocco; Safari su iPhone lo chiede solo dopo un tocco, e allora il mirino mostra il pulsante «Attiva la bussola»
+    DeviceOrientationEvent.requestPermission().then(st => { if (st === "granted") go(); else setState("denied"); }).catch(() => setState(gesture ? "denied" : "perm"));
   },
   bestHeading() { return this.compass != null ? this.compass : this.heading; }
 };
@@ -109,14 +119,14 @@ const Fence = {
     for (const s of ex.stops) {
       const d = haversine(Geo.pos, s.coords);
       if (d <= s.radius && now - (this.last["s" + s.id] || 0) > 15 * 60000) {
-        this.last["s" + s.id] = now; vibrate();
+        this.last["s" + s.id] = now; alertUser();
         toast("Sei alla tappa " + s.n + ", " + s.name, "Apri", () => go("#/" + ex.id + "/tappa/" + s.n), 12000);
       }
     }
     if (store.get("bus", false)) ex.windows.forEach((w, i) => {
       const d = haversine(Geo.pos, w.coords);
       if (d <= w.radius && now - (this.last["w" + i] || 0) > 30 * 60000) {
-        this.last["w" + i] = now; vibrate();
+        this.last["w" + i] = now; alertUser();
         toast("Dal finestrino: " + w.name, "Leggi", () => go("#/" + ex.id + "/finestrino/" + i), 15000);
       }
     });
@@ -124,8 +134,30 @@ const Fence = {
 };
 let wl = null;
 async function wakeLock(on) { try { if (on && "wakeLock" in navigator && !wl) { wl = await navigator.wakeLock.request("screen"); wl.addEventListener("release", () => { wl = null; }); } else if (!on && wl) { await wl.release(); wl = null; } } catch (e) {} }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && MapCtl.follow && !wl) wakeLock(true); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (MapCtl.follow || busMode()) && !wl) wakeLock(true); });
 const vibrate = () => { try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch (e) {} };
+// segnale acustico generato con Web Audio: il contesto audio si sblocca al primo tocco sullo schermo, come richiesto dai browser
+const Chime = {
+  ctx: null,
+  unlock() { try { if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; this.ctx = new C(); } if (this.ctx.state !== "running") this.ctx.resume().catch(() => {}); } catch (e) {} },
+  ready() { return !!(this.ctx && this.ctx.state === "running"); },
+  play() {
+    try {
+      this.unlock(); const c = this.ctx; if (!c) return false;
+      try { if (navigator.audioSession) navigator.audioSession.type = "transient"; } catch (e) {}
+      const t0 = c.currentTime + 0.06, out = c.createGain(); out.gain.value = 0.9; out.connect(c.destination);
+      [[880, 0], [1318.5, 0.16], [880, 0.62], [1318.5, 0.78]].forEach(([f, dt]) => {
+        const o = c.createOscillator(), g = c.createGain(); o.type = "sine"; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(1, t0 + dt + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.45);
+        o.connect(g); g.connect(out); o.start(t0 + dt); o.stop(t0 + dt + 0.5);
+      });
+      return c.state === "running";
+    } catch (e) { return false; }
+  }
+};
+const busMode = () => store.get("bus", false);
+const alertUser = () => { vibrate(); if (busMode()) Chime.play(); };
+["pointerdown", "touchend", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (busMode() && !Chime.ready()) Chime.unlock(); }, true));
 
 /* ------------------------------------------------------------------ router */
 const cur = { ex: null, page: "home", arg: null, exId: store.get("lastEx", null) };
@@ -234,8 +266,13 @@ window.addEventListener("hashchange", () => { while (leaveFns.length) { try { le
 function stopsView(ex) {
   setTitle("Tappe", ex.title);
   const p = page(el("p", { cls: "lead" }, "Le soste della giornata e, in blu, le letture dal finestrino: brevi testi da leggere in pullman quando si attraversano i luoghi che descrivono."));
-  const busOn = store.get("bus", false);
-  const busRow = el("div", { cls: "card row" }, el("div", { cls: "grow" }, el("b", null, "Modalità pullman"), el("div", { cls: "small muted" }, "Con la posizione attiva, l'app avvisa quando si entra in un tratto con una lettura dal finestrino.")), el("button", { cls: "btn sm " + (busOn ? "navy" : ""), on: { click: e => { const v = !store.get("bus", false); store.set("bus", v); e.currentTarget.className = "btn sm " + (v ? "navy" : ""); e.currentTarget.textContent = v ? "Attiva" : "Spenta"; if (v) Geo.start(); } } }, busOn ? "Attiva" : "Spenta"));
+  const busTxt = el("div", { cls: "small muted" });
+  const busBtn = el("button", { cls: "btn sm" });
+  const busTest = el("button", { cls: "btn sm", on: { click: () => { const ok = Chime.play(); vibrate(); if (!ok) setTimeout(() => { if (!Chime.ready()) toast("Il browser non ha ancora attivato l'audio: tocca di nuovo «Prova l'avviso»"); }, 400); } } }, "Prova l'avviso");
+  const busPaint = () => { const v = busMode(); busBtn.className = "btn sm " + (v ? "navy" : "primary"); busBtn.textContent = v ? "Disattiva" : "Attiva"; busTxt.textContent = v ? "Attiva. All'ingresso in un tratto con una lettura dal finestrino e all'arrivo a una tappa il telefono suona e vibra. Tieni l'app aperta in primo piano, lo schermo resta acceso; il suono segue il volume dei contenuti multimediali." : "Con la posizione attiva l'app avvisa con un suono e una vibrazione quando si entra in un tratto con una lettura dal finestrino o si arriva a una tappa."; busTest.style.display = v ? "" : "none"; };
+  busBtn.addEventListener("click", () => { const v = !busMode(); store.set("bus", v); if (v) { Chime.unlock(); Chime.play(); vibrate(); Geo.start(); wakeLock(true); } else if (!MapCtl.follow) wakeLock(false); busPaint(); });
+  busPaint();
+  const busRow = el("div", { cls: "card" }, el("div", { cls: "row" }, el("div", { cls: "grow" }, el("b", null, "Modalità pullman")), busBtn), busTxt, el("div", { style: "margin-top:8px" }, busTest));
   p.append(busRow);
   const done = store.get("done." + ex.id, []);
   const list = el("div"); p.append(list);
@@ -416,29 +453,53 @@ function compassView(ex, stopN) {
   setTitle("Mirino del paesaggio", ex.title);
   const stop = ex.stops.find(s => s.n === stopN) || ex.stops.find(s => s.targets && s.targets.length) || ex.stops[0];
   const p = page(el("div", { cls: "tabs" }, ...ex.stops.filter(s => s.targets && s.targets.length).map(s => el("button", { cls: s === stop ? "on" : "", on: { click: () => go("#/" + ex.id + "/strumenti/mirino/" + s.n) } }, "Tappa " + s.n))));
-  const note = el("p", { cls: "small muted" }); p.append(note);
+  const note = el("p", { cls: "small muted" }), state = el("div"); p.append(note, state);
   const cw = el("div", { cls: "compass" }); p.append(cw);
   const read = el("div", { style: "text-align:center;margin:-4px 0 10px" }); p.append(read);
   const tl = el("ul", { cls: "clean tlist" }); p.append(el("div", { cls: "card" }, tl));
-  p.append(el("div", { cls: "box small" }, el("h4", null, "Come si usa"), "Tieni il telefono piatto davanti a te. La rosa ruota con la bussola: quando il punto colorato di un bersaglio sta in alto, il bersaglio è davanti a te. Senza posizione gli azimut sono calcolati dal punto di sosta. La bussola del telefono può sbagliare di qualche grado vicino a metalli e magneti: muovi il telefono a otto per ricalibrarla."));
+  p.append(el("div", { cls: "box small" }, el("h4", null, "Come si usa"), "Tieni il telefono piatto davanti a te. La rosa ruota con la bussola e, quando il punto colorato di un bersaglio arriva sotto il triangolo rosso, il bersaglio è davanti a te. Se sei a più di tre chilometri dalla tappa gli azimut sono calcolati dal punto di sosta. Vicino a metalli e magneti, compreso l'interno del pullman, la bussola del telefono può sbagliare di parecchi gradi; per ricalibrarla muovi il telefono disegnando un otto."));
   Geo.start();
   const targets = stop.targets.map(k => ex.targets[k]).filter(Boolean);
-  const draw = () => {
-    const from = Geo.pos || stop.coords; const hd = Geo.bestHeading();
-    note.textContent = (Geo.pos ? "Dalla tua posizione" : "Dal punto della tappa " + stop.n + ", posizione non disponibile") + (hd == null ? ". Bussola non disponibile su questo dispositivo: usa gli azimut con una bussola a mano." : ".");
-    let s = '<svg viewBox="-110 -110 220 220"><g transform="rotate(' + (-(hd || 0)).toFixed(1) + ')">';
+  const NEAR = 3000, warn = { cls: "small", style: "color:var(--warn);margin:0 0 8px" };
+  let from = stop.coords, key = "", rose = null, labels = [], rels = [], raf = 0, lastList = 0, shown = "";
+  // parte fissa: rosa, bersagli e lista; si ricostruisce solo quando cambia il punto da cui si calcolano gli azimut
+  const build = () => {
+    const dStop = Geo.pos ? haversine(Geo.pos, stop.coords) : null, near = dStop != null && dStop <= NEAR;
+    from = near ? Geo.pos : stop.coords;
+    note.textContent = near ? "Azimut calcolati dalla tua posizione." : dStop != null ? "Sei a " + fmtDist(dStop) + " dalla tappa " + stop.n + ", quindi gli azimut sono calcolati dal punto di sosta; la rosa ruota comunque con la bussola." : "Posizione non disponibile, azimut calcolati dal punto della tappa " + stop.n + ".";
+    const k = from[0].toFixed(4) + "," + from[1].toFixed(4); if (k === key) return; key = k;
+    let s = '<svg viewBox="-110 -110 220 220"><g class="rose">';
     s += '<circle r="100" fill="var(--card)" stroke="var(--line)" stroke-width="2"/>';
     for (let a = 0; a < 360; a += 10) { const long = a % 30 === 0; s += '<line x1="0" y1="-100" x2="0" y2="' + (long ? -90 : -95) + '" stroke="var(--ink-3)" stroke-width="' + (long ? 2 : 1) + '" transform="rotate(' + a + ')"/>'; }
-    [["N", 0], ["E", 90], ["S", 180], ["W", 270]].forEach(([l, a]) => { s += '<text transform="rotate(' + a + ') translate(0,-74) rotate(' + (-a) + ')" text-anchor="middle" dominant-baseline="middle" font-size="16" font-weight="700" fill="' + (a === 0 ? "var(--red)" : "var(--ink-2)") + '">' + l + "</text>"; });
-    targets.forEach((t, i) => { const az = bearing(from, t.coords); s += '<g transform="rotate(' + az.toFixed(1) + ')"><line x1="0" y1="0" x2="0" y2="-82" stroke="' + TCOL[i % TCOL.length] + '" stroke-width="1.5" stroke-dasharray="3 3"/><circle cy="-84" r="9" fill="' + TCOL[i % TCOL.length] + '" stroke="#fff" stroke-width="2"/><text y="-84" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="#fff">' + (i + 1) + "</text></g>"; });
-    s += "</g>";
-    s += '<path d="M0 -108 l-8 14 h16z" fill="var(--red)"/><circle r="4" fill="var(--ink)"/>';
-    s += "</svg>";
-    cw.innerHTML = s;
-    read.innerHTML = hd != null ? "<span class='big num'>" + fmtAz(hd) + "</span> <span class='muted'>" + cardinal(hd) + "</span>" : "<span class='muted'>direzione sconosciuta</span>";
-    tl.innerHTML = ""; targets.forEach((t, i) => { const az = bearing(from, t.coords), d = haversine(from, t.coords); const rel = hd != null ? ((az - hd + 540) % 360) - 180 : null; tl.append(el("li", null, el("span", { cls: "sw", style: "background:" + TCOL[i % TCOL.length] }), el("span", { cls: "grow" }, el("b", null, (i + 1) + ". " + t.name), t.note ? el("div", { cls: "small muted" }, t.note) : null), el("span", { cls: "az" }, fmtAz(az)), el("span", { cls: "small muted num", style: "min-width:5em;text-align:right" }, fmtDist(d), rel != null ? el("br") : null, rel != null ? (Math.abs(rel) < 8 ? "davanti" : (rel > 0 ? "→ " : "← ") + Math.abs(Math.round(rel)) + "°") : ""))); });
+    [["N", 0], ["E", 90], ["S", 180], ["W", 270]].forEach(([l, a]) => { s += '<text class="lb" data-k="c" data-a="' + a + '" text-anchor="middle" dominant-baseline="middle" font-size="16" font-weight="700" fill="' + (a === 0 ? "var(--red)" : "var(--ink-2)") + '">' + l + "</text>"; });
+    targets.forEach((t, i) => { const az = bearing(from, t.coords); s += '<g transform="rotate(' + az.toFixed(1) + ')"><line x1="0" y1="0" x2="0" y2="-82" stroke="' + TCOL[i % TCOL.length] + '" stroke-width="1.5" stroke-dasharray="3 3"/><circle cy="-84" r="9" fill="' + TCOL[i % TCOL.length] + '" stroke="#fff" stroke-width="2"/><text class="lb" data-k="t" data-a="' + az.toFixed(1) + '" y="-84" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="#fff">' + (i + 1) + "</text></g>"; });
+    s += '</g><path d="M0 -108 l-8 14 h16z" fill="var(--red)"/><circle r="4" fill="var(--ink)"/></svg>';
+    cw.innerHTML = s; rose = cw.querySelector(".rose"); labels = [...cw.querySelectorAll(".lb")].map(x => [x, x.dataset.k, +x.dataset.a]);
+    tl.innerHTML = ""; rels = [];
+    targets.forEach((t, i) => { const az = bearing(from, t.coords), d = haversine(from, t.coords); const rel = el("span"); rels.push([az, rel]); tl.append(el("li", null, el("span", { cls: "sw", style: "background:" + TCOL[i % TCOL.length] }), el("span", { cls: "grow" }, el("b", null, (i + 1) + ". " + t.name), t.note ? el("div", { cls: "small muted" }, t.note) : null), el("span", { cls: "az" }, fmtAz(az)), el("span", { cls: "small muted num", style: "min-width:5em;text-align:right" }, fmtDist(d), el("br"), rel))); });
+    lastList = 0; paint();
   };
-  draw(); onLeave(Geo.on(draw));
+  // parte mobile: ruota la rosa a ogni lettura della bussola, al ritmo dello schermo
+  const paint = () => {
+    raf = 0; const hd = Geo.bestHeading();
+    const h0 = hd || 0;
+    if (rose) rose.setAttribute("transform", "rotate(" + (-h0).toFixed(1) + ")");
+    // lettere e numeri restano sempre diritti mentre la rosa gira
+    labels.forEach(([x, k, a]) => x.setAttribute("transform", k === "c" ? "rotate(" + a + ") translate(0,-74) rotate(" + (h0 - a).toFixed(1) + ")" : "rotate(" + (h0 - a).toFixed(1) + " 0 -84)"));
+    read.innerHTML = hd != null ? "<span class='big num'>" + fmtAz(hd) + "</span> <span class='muted'>" + cardinal(hd) + "</span>" : "<span class='muted'>direzione sconosciuta</span>";
+    const now = Date.now(); if (now - lastList > 250) { lastList = now; rels.forEach(([az, sp]) => { if (hd == null) { sp.textContent = ""; return; } const r = ((az - hd + 540) % 360) - 180; sp.textContent = Math.abs(r) < 8 ? "davanti" : (r > 0 ? "→ " : "← ") + Math.abs(Math.round(r)) + "°"; }); }
+    showState();
+  };
+  const showState = () => {
+    const st = Geo.compassState; if (st === shown) return; shown = st; state.innerHTML = "";
+    if (st === "wait" || st === "off") state.append(el("p", { cls: "small muted", style: "margin:0 0 8px" }, "In attesa della bussola del telefono…"));
+    else if (st === "perm") state.append(el("button", { cls: "btn primary block", style: "margin-bottom:8px", on: { click: () => Geo.startCompass(true) } }, "Attiva la bussola"));
+    else if (st === "denied") state.append(el("p", warn, "Il permesso ai sensori di movimento è stato negato. Va concesso di nuovo nelle impostazioni del browser per questo sito; poi chiudi e riapri l'app."));
+    else if (st === "rel") state.append(el("p", warn, "Il telefono segnala come ruota ma non dove sta il nord, quindi la rosa resta ferma. Muovi il telefono disegnando un otto per calibrare la bussola; se non basta, usa gli azimut della lista con una bussola a mano."));
+    else if (st === "none") state.append(el("p", warn, "Nessun segnale dalla bussola. Muovi il telefono disegnando un otto; se la rosa resta ferma, controlla nelle impostazioni del sito in Chrome che i sensori di movimento siano consentiti, poi chiudi e riapri l'app. Alcuni tablet non hanno il sensore."));
+  };
+  const onHead = () => { if (!raf) raf = requestAnimationFrame(paint); };
+  build(); onLeave(Geo.on(build)); onLeave(Geo.onHeading(onHead)); onLeave(() => { if (raf) cancelAnimationFrame(raf); });
 }
 
 function clinoView(ex) {
@@ -757,7 +818,7 @@ const MapCtl = {
   controls(ex) {
     this.wrap.querySelectorAll(".mapctl, .sheet, .legend").forEach(e => e.remove());
     const tr = el("div", { cls: "mapctl tr" });
-    const bGps = el("button", { cls: "mbtn" + (this.follow ? " on" : ""), title: "Segui la posizione", html: SVG.gps, on: { click: () => { if (!Geo.active()) Geo.start(); this.follow = !this.follow; bGps.classList.toggle("on", this.follow); if (this.follow && Geo.pos) this.map.setView(Geo.pos, Math.max(this.map.getZoom(), 15)); wakeLock(this.follow); } } });
+    const bGps = el("button", { cls: "mbtn" + (this.follow ? " on" : ""), title: "Segui la posizione", html: SVG.gps, on: { click: () => { if (!Geo.active()) Geo.start(); this.follow = !this.follow; bGps.classList.toggle("on", this.follow); if (this.follow && Geo.pos) this.map.setView(Geo.pos, Math.max(this.map.getZoom(), 15)); wakeLock(this.follow || busMode()); } } });
     const bLay = el("button", { cls: "mbtn", title: "Sfondo", html: SVG.layers, on: { click: () => { const nb = this.base === "topo" ? "osm" : "topo"; this.map.removeLayer(this.bases[this.base]); this.bases[nb].addTo(this.map).bringToBack(); this.base = nb; store.set("base", nb); toast(nb === "topo" ? "Sfondo: rilievo (OpenTopoMap)" : "Sfondo: stradale (OpenStreetMap)"); } } });
     const bLeg = el("button", { cls: "mbtn", title: "Legenda", html: SVG.legend, on: { click: () => { this.legendEl.classList.toggle("hidden"); } } });
     const bFit = el("button", { cls: "mbtn", title: "Inquadra l'area", html: SVG.fit, on: { click: () => this.map.setView(ex.center, ex.zoom) } });
@@ -868,7 +929,7 @@ function controlloView() {
     out.append(row(geo === "granted" ? true : geo === "denied" ? false : null, "Posizione", geo === "granted" ? (Geo.pos ? "Attiva, precisione ± " + Math.round(Geo.acc) + " m." : "Permesso concesso.") : geo === "denied" ? "Permesso negato: va riattivato nelle impostazioni del telefono (vedi «Come si installa», ultima sezione)." : "Non ancora concessa.", geo === "granted" ? null : el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: () => { Geo.start(); const off = Geo.on(() => { if (Geo.pos || Geo.err) { off(); draw(); } }); } } }, "Consenti la posizione")));
     // 3. bussola
     const hasHead = Geo.compass != null;
-    out.append(row(hasHead ? true : null, "Bussola", hasHead ? "Funziona: direzione " + fmtAz(Geo.compass) + "." : "Serve al mirino del paesaggio. Tocca il pulsante e ruota il telefono; alcuni tablet non hanno il sensore.", hasHead ? null : el("button", { cls: "btn sm", style: "margin-top:6px", on: { click: () => { Geo.startCompass(); setTimeout(draw, 2500); } } }, "Prova la bussola")));
+    out.append(row(hasHead ? true : null, "Bussola", hasHead ? "Funziona: direzione " + fmtAz(Geo.compass) + "." : "Serve al mirino del paesaggio. Tocca il pulsante e ruota il telefono; alcuni tablet non hanno il sensore.", hasHead ? null : el("button", { cls: "btn sm", style: "margin-top:6px", on: { click: () => { Geo.startCompass(true); setTimeout(draw, 2500); } } }, "Prova la bussola")));
     // 4. contenuti offline
     const st = await Offline.status(exk); if (gen !== drawGen) return; const pct = Math.round(st.done / st.total * 100);
     res.off = pct >= 97;
@@ -956,7 +1017,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.3";
+const VERSION = "1.3.1";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
@@ -970,6 +1031,7 @@ if ("serviceWorker" in navigator) {
 }
 window.addEventListener("online", () => toast("Connessione ripristinata")); window.addEventListener("offline", () => toast("Sei senza rete; carte, figure e audio salvati restano disponibili"));
 applyPrefs(); Viewer.init(); render();
+if (busMode()) { Geo.start(); wakeLock(true); }
 // se il permesso è già stato concesso in una sessione precedente, la posizione riparte da sola
 if (navigator.permissions && navigator.permissions.query) navigator.permissions.query({ name: "geolocation" }).then(p => { if (p.state === "granted" && store.get("geoAuto", true)) Geo.start(); }).catch(() => {});
 })();
