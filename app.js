@@ -116,8 +116,8 @@ const Geo = {
       this.compassOn = true; setState("wait");
       const onAbs = e => {
         if (e.alpha == null) { D.absNull++; return; }
-        D.abs++; D.last = [e.alpha, e.beta, e.gamma]; this.compassAbs = true; this.absT = Date.now();
-        const hd = this.headingFromEuler(e.alpha, e.beta || 0, e.gamma || 0); if (hd != null) this.feedHeading(hd, "evento assoluto");
+        D.abs++; D.last = [e.alpha, e.beta, e.gamma]; this.compassAbs = true; this.absT = Date.now(); this.rawSig(e.alpha.toFixed(4) + e.beta + e.gamma);
+        const hd = this.headingFromEuler(e.alpha, e.beta || 0, e.gamma || 0); D.evHd = hd; if (hd != null) this.feedHeading(hd, "evento assoluto");
       };
       const onRel = e => {
         if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0) {
@@ -125,11 +125,9 @@ const Geo = {
         }
         if (e.alpha == null) return;
         if (e.absolute === true) { D.relAbs++; onAbs({ alpha: e.alpha, beta: e.beta, gamma: e.gamma }); return; }
-        D.rel++; if (!this.compassAbs && this.compassState === "wait") setState("rel");
+        D.rel++; D.relLast = [e.alpha, e.beta, e.gamma]; if (!this.compassAbs && this.compassState === "wait") setState("rel");
       };
-      if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", onAbs, true);
-      window.addEventListener("deviceorientation", onRel, true);
-      this.startAOS();
+      this._onAbs = onAbs; this._onRel = onRel; this.attachCompass();
       setTimeout(() => { if (this.compassState === "wait") setState(needPerm && !gesture ? "perm" : "none"); }, 4000);
     } else if (gesture) this.startAOS(true);
     if (!needPerm || this.compassState === "ok") return;
@@ -137,13 +135,27 @@ const Geo = {
     const fail = () => { if (this.compassState !== "ok") setState(gesture ? (this.compassState === "rel" ? "rel" : "denied") : "perm"); };
     try { DeviceOrientationEvent.requestPermission(true).then(st => { D.perm = st; if (st !== "granted") setTimeout(fail, 600); else if (gesture) this.startAOS(true); }).catch(err => { D.perm = "errore " + (err && err.name || ""); setTimeout(fail, 600); }); } catch (e) { fail(); }
   },
+  // dopo un passaggio in secondo piano alcuni telefoni non riprendono a mandare letture finché la pagina non si ricarica:
+  // i ricevitori si staccano e si riattaccano, che equivale a riaccendere i sensori
+  attachCompass() {
+    if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", this._onAbs, true);
+    window.addEventListener("deviceorientation", this._onRel, true);
+    this.startAOS(true); this._rawT = performance.now();
+  },
+  restartCompass() {
+    if (!this.compassOn || !this._onAbs) return;
+    window.removeEventListener("deviceorientationabsolute", this._onAbs, true); window.removeEventListener("deviceorientation", this._onRel, true);
+    if (this.aos) { try { this.aos.stop(); } catch (e) {} this.aos = null; }
+    this.diag.restarts = (this.diag.restarts || 0) + 1; setTimeout(() => this.attachCompass(), 150);
+  },
+  rawSig(s) { if (s !== this._sig) { this._sig = s; this._rawT = performance.now(); } },
   startAOS(retry) {
     if (typeof AbsoluteOrientationSensor !== "function" || (this.aos && !retry)) return;
     try {
       if (this.aos) { try { this.aos.stop(); } catch (e) {} }
       const s = new AbsoluteOrientationSensor({ frequency: 30, referenceFrame: "device" });
       s.addEventListener("reading", () => {
-        this.diag.aos++; if (!s.quaternion) return;
+        this.diag.aos++; if (!s.quaternion) return; this.diag.aosHd = this.headingFromQuat(s.quaternion); this.rawSig(s.quaternion.map(v => v.toFixed(6)).join());
         // il sensore serve solo se gli eventi assoluti non arrivano
         if (Date.now() - this.absT < 1500) return;
         const hd = this.headingFromQuat(s.quaternion); if (hd != null) this.feedHeading(hd, "sensore di orientamento");
@@ -220,6 +232,8 @@ const SoundBar = {
     else if (!need && this.bar) { this.bar.remove(); this.bar = null; }
   }
 };
+["visibilitychange", "focus", "pageshow"].forEach(ev => window.addEventListener(ev, () => { if (document.visibilityState === "visible" && Geo.compassOn) Geo.restartCompass(); }));
+setInterval(() => { if (Geo.compassOn && Geo.headFns.size && document.visibilityState === "visible" && performance.now() - (Geo._rawT || 0) > 4000) { Geo._rawT = performance.now(); Geo.restartCompass(); } }, 2000);
 const busMode = () => store.get("bus", false);
 const alertUser = (title, body, hash) => { vibrate(); if (busMode()) { Chime.play(); Notify.show(title, body, hash); SoundBar.check(); } };
 ["pointerdown", "touchend", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (busMode() && !Chime.ready()) Chime.unlock(); }, true));
@@ -241,6 +255,7 @@ function setNav(exId, page) {
 function setTitle(t, s) { $("#ttl").textContent = t; $("#sub").textContent = s || ""; }
 
 function render() {
+  while (leaveFns.length) { try { leaveFns.pop()(); } catch (e) {} }
   const parts = (location.hash || "#/").slice(2).split("/").filter(Boolean);
   let exId = null, page = "home", arg = null;
   if (EX[parts[0]]) { exId = parts[0]; page = parts[1] || "home"; arg = parts[2]; } else { page = parts[0] || "home"; arg = parts[1]; }
@@ -326,7 +341,7 @@ function exHome(ex) {
 
 const leaveFns = [];
 function onLeave(fn) { leaveFns.push(fn); }
-window.addEventListener("hashchange", () => { while (leaveFns.length) { try { leaveFns.pop()(); } catch (e) {} } }, true);
+// le funzioni di uscita della vista precedente si eseguono all'inizio di render(), prima che la nuova vista registri le sue
 
 /* ------------------------------------------------------------------ tappe */
 function stopsView(ex) {
@@ -565,12 +580,43 @@ function compassView(ex, stopN) {
     else if (st === "none") state.append(el("p", warn, "Nessun segnale dalla bussola. Tocca «Attiva la bussola», poi muovi il telefono disegnando un otto; se la rosa resta ferma, controlla nelle impostazioni del sito in Chrome che i sensori di movimento siano consentiti, poi chiudi e riapri l'app. Alcuni tablet non hanno il sensore."), el("button", { cls: "btn primary block", style: "margin-bottom:8px", on: { click: () => Geo.startCompass(true) } }, "Attiva la bussola"));
   };
   const onHead = () => { if (!raf) raf = requestAnimationFrame(paint); };
-  // dati grezzi dei sensori: servono a capire, da una schermata, perché su un telefono la rosa resta ferma
+  // dati grezzi dei sensori: servono a capire, da una schermata, perché su un telefono la rosa resta ferma.
+  // Con il riquadro aperto si accendono anche accelerometro, giroscopio e orientamento relativo, per vedere quale sensore non si aggiorna.
   const dg = el("pre", { cls: "small", style: "white-space:pre-wrap;margin:6px 0 0;font-size:.78em" });
-  p.append(el("details", { cls: "card small" }, el("summary", null, "Dati dei sensori"), dg));
-  const fmt = v => v == null ? "–" : Math.round(v);
-  const dpaint = () => { const D = Geo.diag; dg.textContent = "Versione " + VERSION + "\nStato bussola: " + Geo.compassState + (D.src ? ", da " + D.src : "") + "\nEventi assoluti: " + D.abs + " (vuoti " + D.absNull + ")\nEventi relativi: " + D.rel + ", con nord " + D.relAbs + ", Safari " + D.wk + "\nSensore di orientamento: " + (typeof AbsoluteOrientationSensor === "function" ? D.aos + " letture" + (D.aosErr ? ", " + D.aosErr : "") : "assente") + "\nPermesso: " + (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function" ? (D.perm || "non ancora chiesto") : "non richiesto") + "\nUltima lettura: " + (D.last ? "alpha " + fmt(D.last[0]) + ", beta " + fmt(D.last[1]) + ", gamma " + fmt(D.last[2]) : "nessuna") + "\nDirezione: " + fmt(Geo.compass) + "°, schermo " + ((screen.orientation && screen.orientation.angle) || 0) + "°\n" + navigator.userAgent; };
-  dpaint(); const dT = setInterval(dpaint, 500); onLeave(() => clearInterval(dT));
+  const det = el("details", { cls: "card small" }, el("summary", null, "Dati dei sensori"), dg); p.append(det);
+  const fmt = v => v == null || isNaN(v) ? "–" : Math.round(v);
+  const extra = { acc: 0, accV: null, gyr: 0, gyrV: null, ros: 0, rosHd: null, err: {} }, sens = [];
+  const probe = (name, make, onRead) => { try { if (typeof window[name] !== "function") { extra.err[name] = "assente"; return; } const s = make(); s.addEventListener("reading", () => onRead(s)); s.addEventListener("error", e => { extra.err[name] = (e.error && e.error.name) || "errore"; }); s.start(); sens.push(s); } catch (e) { extra.err[name] = e.name || "errore"; } };
+  det.addEventListener("toggle", () => {
+    if (det.open && !sens.length) {
+      probe("Accelerometer", () => new Accelerometer({ frequency: 10 }), s => { extra.acc++; extra.accV = [s.x, s.y, s.z]; });
+      probe("Gyroscope", () => new Gyroscope({ frequency: 10 }), s => { extra.gyr++; extra.gyrV = Math.hypot(s.x, s.y, s.z) * 180 / Math.PI; });
+      probe("RelativeOrientationSensor", () => new RelativeOrientationSensor({ frequency: 10, referenceFrame: "device" }), s => { extra.ros++; if (s.quaternion) extra.rosHd = Geo.headingFromQuat(s.quaternion); });
+    }
+  });
+  onLeave(() => sens.forEach(s => { try { s.stop(); } catch (e) {} }));
+  // Chrome consegna le letture dei sensori solo alla pagina che ha il focus: se una finestra sovrapposta lo prende, la rosa si ferma
+  let blurs = 0; const onBlur = () => { blurs++; }; window.addEventListener("blur", onBlur); onLeave(() => window.removeEventListener("blur", onBlur));
+  let prev = null, rate = { abs: 0, rel: 0, aos: 0, acc: 0, gyr: 0, ros: 0 };
+  const fw = el("p", { cls: "small", style: "color:var(--warn);margin:0 0 8px;display:none" }, "Il telefono ha sospeso i sensori perché un'altra finestra ha preso il controllo dello schermo. Tocca la rosa per riattivarli.");
+  state.after(fw);
+  const dpaint = () => {
+    fw.style.display = document.visibilityState === "visible" && !document.hasFocus() && performance.now() - (Geo._ht || 0) > 2500 ? "" : "none";
+    const D = Geo.diag, cur = { abs: D.abs, rel: D.rel, aos: D.aos, acc: extra.acc, gyr: extra.gyr, ros: extra.ros, t: performance.now() };
+    if (prev) { const dt = (cur.t - prev.t) / 1000; for (const k in rate) rate[k] = Math.round((cur[k] - prev[k]) / dt); } prev = cur;
+    const st = n => extra.err[n] ? extra.err[n] : null;
+    dg.textContent = "Versione " + VERSION + "\nPagina: " + (document.visibilityState === "visible" ? "visibile" : "nascosta") + ", focus " + (document.hasFocus() ? "sì" : "no") + ", perso " + blurs + " volte" + "\nStato bussola: " + Geo.compassState + (D.src ? ", da " + D.src : "") + ", riavvii " + (D.restarts || 0) + "\nDirezione: " + fmt(Geo.compass) + "°, schermo " + ((screen.orientation && screen.orientation.angle) || 0) + "°"
+      + "\n\nEventi assoluti: " + D.abs + " (vuoti " + D.absNull + "), " + rate.abs + " al secondo, direzione " + fmt(D.evHd) + "°"
+      + "\nEventi relativi: " + D.rel + ", " + rate.rel + " al secondo, alpha " + fmt(D.relLast && D.relLast[0]) + (D.relAbs ? ", con nord " + D.relAbs : "") + (D.wk ? ", Safari " + D.wk : "")
+      + "\nSensore assoluto: " + (typeof AbsoluteOrientationSensor === "function" ? D.aos + " letture, " + rate.aos + " al secondo, direzione " + fmt(D.aosHd) + "°" + (D.aosErr ? ", " + D.aosErr : "") : "assente")
+      + "\nPermesso: " + (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function" ? (D.perm || "non ancora chiesto") : "non richiesto")
+      + "\nUltima lettura assoluta: " + (D.last ? "alpha " + fmt(D.last[0]) + ", beta " + fmt(D.last[1]) + ", gamma " + fmt(D.last[2]) : "nessuna")
+      + "\n\nAccelerometro: " + (st("Accelerometer") || rate.acc + " al secondo" + (extra.accV ? ", " + extra.accV.map(v => v.toFixed(1)).join(" / ") : ""))
+      + "\nGiroscopio: " + (st("Gyroscope") || rate.gyr + " al secondo" + (extra.gyrV != null ? ", rotazione " + fmt(extra.gyrV) + "°/s" : ""))
+      + "\nOrientamento relativo: " + (st("RelativeOrientationSensor") || rate.ros + " al secondo, direzione " + fmt(extra.rosHd) + "°")
+      + "\n\n" + navigator.userAgent;
+  };
+  dpaint(); const dT = setInterval(dpaint, 1000); onLeave(() => clearInterval(dT));
   build(); onLeave(Geo.on(build)); onLeave(Geo.onHeading(onHead)); onLeave(() => { if (raf) cancelAnimationFrame(raf); });
 }
 
@@ -591,11 +637,15 @@ function clinoView(ex) {
     const dip = 90 - theta; last = dip;
     if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; $("#clv").textContent = dip.toFixed(0) + "°"; const roll = Math.atan2(ax, -ay) * 180 / Math.PI; $("#lvl").style.transform = "rotate(" + (-roll).toFixed(1) + "deg)"; msg.textContent = "Inclinazione del lato lungo rispetto all'orizzontale."; }); }
   };
-  const start = () => { window.addEventListener("devicemotion", h, true); };
+  // il ricevitore si attacca subito; dove esiste la richiesta di permesso (iPhone e Chrome recenti) si prova senza tocco e, se serve, compare il pulsante
+  let got = false; const h0 = e => { got = true; h(e); };
+  window.addEventListener("devicemotion", h0, true);
   if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
-    const b = el("button", { cls: "btn primary block", on: { click: () => DeviceMotionEvent.requestPermission().then(s => { if (s === "granted") { start(); b.remove(); } else msg.textContent = "Permesso ai sensori negato."; }) } }, "Attiva i sensori di movimento"); p.insertBefore(b, c);
-  } else start();
-  onLeave(() => window.removeEventListener("devicemotion", h, true));
+    const ask = () => DeviceMotionEvent.requestPermission().then(s => { if (s === "granted") { if (b.isConnected) b.remove(); } else if (!got) msg.textContent = "Permesso ai sensori negato."; }).catch(() => {});
+    const b = el("button", { cls: "btn primary block", on: { click: ask } }, "Attiva i sensori di movimento");
+    ask(); setTimeout(() => { if (!got && !b.isConnected) p.insertBefore(b, c); }, 1500);
+  }
+  onLeave(() => window.removeEventListener("devicemotion", h0, true));
 }
 
 function compareView(ex) {
@@ -1089,7 +1139,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.3.3";
+const VERSION = "1.3.5";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
