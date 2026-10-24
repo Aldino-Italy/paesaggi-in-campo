@@ -1,8 +1,8 @@
 /* Paesaggi in campo. Service worker: guscio dell'app precaricato, figure e tessere di carta salvate quando vengono viste
    o quando l'utente le scarica in blocco da «Prepara l'uso offline». */
-const V = "v1.2.3";
+const V = "v1.2.4";
 const SHELL = "pic-shell-" + V, TILES = "pic-tiles-v1", IMGS = "pic-imgs-v1";
-const SHELL_FILES = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "data/vajont.js", "data/carso.js", "data/routes.js", "data/installa.js",
+const SHELL_FILES = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "data/vajont.js", "data/carso.js", "data/routes.js", "data/installa.js", "data/audio.js",
   "vendor/leaflet.js", "vendor/leaflet.css", "vendor/images/marker-icon.png", "vendor/images/marker-icon-2x.png", "vendor/images/marker-shadow.png", "vendor/images/layers.png", "vendor/images/layers-2x.png",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png", "img/cover_vajont.jpg", "img/cover_carso.jpg", "img/ritrovo1.jpg", "img/ritrovo2.jpg"];
 
@@ -15,6 +15,15 @@ self.addEventListener("activate", e => {
 const isTile = u => /tile\.opentopomap\.org|tile\.openstreetmap\.org/.test(u.host);
 const tileKey = u => u.href.replace(/\/\/[abc]\.tile\./, "//tile.");
 
+async function ranged(req, res) {
+  const range = req.headers.get("range"); if (!range || res.status !== 200) return res;
+  const buf = await res.arrayBuffer(), size = buf.byteLength, m = /bytes=(\d*)-(\d*)/.exec(range);
+  let start = 0, end = size - 1;
+  if (m && m[1]) { start = +m[1]; if (m[2]) end = Math.min(+m[2], size - 1); } else if (m && m[2]) start = Math.max(0, size - +m[2]);
+  if (start >= size) return new Response("", { status: 416, headers: { "Content-Range": "bytes */" + size } });
+  return new Response(buf.slice(start, end + 1), { status: 206, statusText: "Partial Content", headers: { "Content-Type": res.headers.get("Content-Type") || "audio/mp4", "Content-Range": "bytes " + start + "-" + end + "/" + size, "Content-Length": String(end - start + 1), "Accept-Ranges": "bytes" } });
+}
+
 self.addEventListener("fetch", e => {
   const req = e.request; if (req.method !== "GET") return;
   const u = new URL(req.url);
@@ -26,7 +35,16 @@ self.addEventListener("fetch", e => {
     return;
   }
   if (u.origin !== location.origin) return;
-  if (/\/img\//.test(u.pathname) || /\/audio\//.test(u.pathname) || /\/docs\//.test(u.pathname)) {
+  if (/\/audio\//.test(u.pathname)) {
+    // audio: il file intero sta in cache e le richieste parziali (Range, usate da Safari) ricevono la porzione richiesta
+    e.respondWith(caches.open(IMGS).then(async c => {
+      let hit = await c.match(u.href);
+      if (!hit) { try { const r = await fetch(u.href); if (!r.ok) return r; await c.put(u.href, r.clone()); hit = r; } catch (err) { return new Response("", { status: 504 }); } }
+      return ranged(req, hit);
+    }));
+    return;
+  }
+  if (/\/img\//.test(u.pathname) || /\/docs\//.test(u.pathname)) {
     e.respondWith(caches.open(IMGS).then(async c => {
       const hit = await c.match(req); if (hit) return hit;
       try { const r = await fetch(req); if (r.ok && !/\/docs\//.test(u.pathname)) c.put(req, r.clone()); return r; } catch (err) { return new Response("", { status: 504 }); }

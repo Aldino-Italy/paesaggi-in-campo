@@ -190,7 +190,7 @@ function home() {
     p.append(el("a", { cls: "hero", href: "#/" + k, style: "display:block;text-decoration:none" }, el("img", { src: ex.cover, alt: "" }), el("div", { cls: "txt" }, el("b", null, ex.title), el("span", null, ex.subtitle))));
   }
   p.append(el("div", { cls: "card" }, el("h3", null, "Prima di partire"),
-    el("ol", { cls: "small", style: "padding-left:1.2em;margin:0 0 10px" }, el("li", null, "Installa l'app sul telefono o sul tablet seguendo le istruzioni per il tuo browser."), el("li", null, "Aprila dall'icona e fai il «Controllo di partenza»: consenti la posizione e scarica carte e figure per l'uso senza rete."), el("li", null, "Quando il riquadro in fondo al controllo è verde, il telefono è pronto per l'escursione.")),
+    el("ol", { cls: "small", style: "padding-left:1.2em;margin:0 0 10px" }, el("li", null, "Installa l'app sul telefono o sul tablet seguendo le istruzioni per il tuo browser."), el("li", null, "Aprila dall'icona e fai il «Controllo di partenza»: consenti la posizione e scarica carte, figure e audio per l'uso senza rete."), el("li", null, "Quando il riquadro in fondo al controllo è verde, il telefono è pronto per l'escursione.")),
     el("div", { cls: "row wrap" }, el("a", { cls: "btn sm primary", href: "#/installa" }, "Come si installa"), el("a", { cls: "btn sm", href: "#/controllo" }, "Controllo di partenza"))));
   p.append(el("p", { cls: "small muted" }, "Testi e figure dalle guide dell'escursione (A. Bondesan). Le fonti sono indicate in ogni didascalia. Cartografia di base © OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)."));
 }
@@ -281,11 +281,14 @@ function stopView(ex, n) {
     draw(); onLeave(Geo.on(draw));
     p.append(el("div", { cls: "card" }, el("h3", null, "Dove guardare"), el("p", { cls: "small muted" }, Geo.pos ? "Azimut e distanze dalla tua posizione." : "Azimut e distanze calcolati dal punto di sosta; con la posizione attiva si aggiornano."), tl, el("a", { cls: "btn sm", style: "margin-top:8px", href: "#/" + ex.id + "/strumenti/mirino/" + s.n, html: SVG.target + " Apri il mirino del paesaggio" })));
   }
-  // audio del docente
-  const au = el("div", { cls: "card" }, el("h3", null, "Audio del docente"), el("p", { cls: "small muted" }, "Breve introduzione alla tappa, da ascoltare con gli auricolari prima di scendere."));
+  // introduzione audio della tappa (voce sintetica; il testo letto è sotto il lettore)
+  const AT = ((window.DATA.audio || {})[ex.id] || {})[s.n];
+  const au = el("div", { cls: "card" }, el("h3", null, "Introduzione audio"), el("p", { cls: "small muted" }, "Presentazione della tappa letta da una voce sintetica" + (AT && AT.d ? ", circa " + Math.max(1, Math.round(AT.d / 60)) + " minuti" : "") + ". Si ascolta meglio con gli auricolari, prima di scendere dal pullman."));
   const audio = el("audio", { controls: "", preload: "none", style: "width:100%" }); const src = "audio/" + ex.id + "_" + s.n + ".m4a";
-  audio.src = src; audio.addEventListener("error", () => { audio.replaceWith(el("p", { cls: "small", style: "color:var(--warn)" }, "Registrazione non ancora disponibile per questa tappa.")); }, { once: true });
-  au.append(audio); p.append(au);
+  audio.src = src; audio.addEventListener("error", () => { audio.replaceWith(el("p", { cls: "small", style: "color:var(--warn)" }, "Audio non disponibile per questa tappa.")); }, { once: true });
+  au.append(audio);
+  if (AT && AT.t) au.append(el("details", { cls: "small", style: "margin-top:8px" }, el("summary", null, "Testo dell'audio"), ...AT.t.split("\n").filter(Boolean).map(x => el("p", null, x))));
+  p.append(au);
   if (s.figures && s.figures.length) { p.append(el("h3", null, "Figure della tappa")); s.figures.forEach(id => p.append(figInline(ex, id))); }
   if (s.links && s.links.length) p.append(el("div", { cls: "card" }, el("h3", null, "Per approfondire"), el("ul", { cls: "clean small" }, ...s.links.map(l => el("li", null, el("a", { href: l.u, target: "_blank", rel: "noopener" }, l.t))))));
   if (s.questions) p.append(el("div", { cls: "dash" }, el("b", { style: "color:var(--red)" }, "Da chiedersi qui"), el("ul", { cls: "dots", style: "margin-top:6px" }, ...s.questions.map(q => el("li", null, q)))));
@@ -500,22 +503,87 @@ function beforeAfter(a, b, la, lb) {
 
 function sketchView(ex) {
   setTitle("Schizzo panoramico", ex.title);
-  const p = page(el("p", { cls: "lead" }, "Scatta o scegli una foto del versante, poi disegna sopra con il dito: la traccia degli strati, le faglie, il limite della frana, le forme. Lo schizzo si salva nel taccuino."));
-  const inp = el("input", { type: "file", accept: "image/*", capture: "environment", style: "display:none" });
-  const canvas = el("canvas", { style: "width:100%;border-radius:10px;touch-action:none;background:var(--soft);display:block" });
-  const ctx = canvas.getContext("2d"); let img = null, drawing = false, color = "#c00000", width = 4, strokes = [], curS = null;
-  const resize = () => { const r = canvas.getBoundingClientRect(); const ratio = img ? img.height / img.width : 0.66; canvas.width = 1280; canvas.height = Math.round(1280 * ratio); canvas.style.height = (r.width * ratio) + "px"; redraw(); };
-  const redraw = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height); else { ctx.fillStyle = "#e8e4dc"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#777"; ctx.font = "36px sans-serif"; ctx.textAlign = "center"; ctx.fillText("Scatta una foto o disegna su sfondo neutro", canvas.width / 2, canvas.height / 2); } ctx.lineCap = "round"; ctx.lineJoin = "round"; for (const s of strokes) { ctx.strokeStyle = s.c; ctx.lineWidth = s.w; ctx.beginPath(); s.p.forEach((pt, i) => i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1])); ctx.stroke(); } };
-  const pos = e => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * canvas.width, (e.clientY - r.top) / r.height * canvas.height]; };
-  canvas.addEventListener("pointerdown", e => { drawing = true; canvas.setPointerCapture(e.pointerId); curS = { c: color, w: width, p: [pos(e)] }; strokes.push(curS); });
-  canvas.addEventListener("pointermove", e => { if (!drawing) return; curS.p.push(pos(e)); redraw(); });
-  canvas.addEventListener("pointerup", () => drawing = false); canvas.addEventListener("pointercancel", () => drawing = false);
-  inp.addEventListener("change", () => { const f = inp.files[0]; if (!f) return; const u = URL.createObjectURL(f); const im = new Image(); im.onload = () => { img = im; strokes = []; resize(); URL.revokeObjectURL(u); }; im.src = u; });
-  const pal = el("div", { cls: "row wrap", style: "margin:10px 0" });
-  [["#c00000", "strati"], ["#111111", "faglie"], ["#1f78b4", "acqua"], ["#2e7d32", "forme"], ["#ffffff", "note"]].forEach(([c, l]) => pal.append(el("button", { cls: "btn sm", style: "border-color:" + c + ";border-width:2px", on: { click: () => color = c } }, el("span", { cls: "dot", style: "background:" + c + ";border:1px solid #999" }), l)));
-  pal.append(el("button", { cls: "btn sm", on: { click: () => { strokes.pop(); redraw(); } } }, "Annulla tratto"), el("button", { cls: "btn sm", on: { click: () => { strokes = []; redraw(); } } }, "Pulisci"));
-  p.append(el("div", { cls: "row", style: "margin-bottom:10px" }, el("button", { cls: "btn", on: { click: () => inp.click() }, html: SVG.cam + " Foto" }), el("button", { cls: "btn primary grow", on: { click: async () => { const data = canvas.toDataURL("image/jpeg", 0.85); await NB.add({ ex: ex.id, stop: null, text: "Schizzo panoramico", ts: Date.now(), lat: Geo.pos ? Geo.pos[0] : null, lon: Geo.pos ? Geo.pos[1] : null, photo: data }); toast("Schizzo salvato nel taccuino"); } } }, "Salva nel taccuino")), inp, canvas, pal);
-  setTimeout(resize, 50); window.addEventListener("resize", resize); onLeave(() => window.removeEventListener("resize", resize));
+  const p = page(el("p", { cls: "lead" }, "Scatta o scegli una foto del versante, poi disegna sopra con il dito la traccia degli strati, le faglie, il limite della frana e le forme. Ruotando il telefono in orizzontale la lavagna occupa tutto lo schermo; lo schizzo resta salvo anche se l'app si chiude e con «Salva nel taccuino» lo archivi."));
+  const KEY = "sketch." + ex.id, MAXS = 1600;
+  const canvas = el("canvas", { cls: "sk-canvas" }); const ctx = canvas.getContext("2d");
+  let bg = null, strokes = [], cur = null, drawing = false, color = "#c00000", thick = 0.005, full = false, autoFull = false, stream = null, camEl = null, suppress = false;
+  const toWork = (src, sw, sh) => { const k = Math.min(1, MAXS / Math.max(sw, sh)); const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k)); c.getContext("2d").drawImage(src, 0, 0, c.width, c.height); return c; };
+  const setSize = () => { if (bg) { canvas.width = bg.width; canvas.height = bg.height; } else { canvas.width = MAXS; canvas.height = Math.round(MAXS * 0.66); } };
+  const paintStroke = s => { if (!s.p.length) return; ctx.strokeStyle = s.c; ctx.lineWidth = s.w * canvas.width; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); s.p.forEach((pt, i) => { const x = pt[0] * canvas.width, y = pt[1] * canvas.height; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); if (s.p.length === 1) ctx.lineTo(s.p[0][0] * canvas.width + 0.1, s.p[0][1] * canvas.height); ctx.stroke(); };
+  const redraw = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (bg) ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
+    else { ctx.fillStyle = "#e8e4dc"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#777"; ctx.font = Math.round(canvas.width / 34) + "px sans-serif"; ctx.textAlign = "center"; ctx.fillText("Scatta una foto o disegna su sfondo neutro", canvas.width / 2, canvas.height / 2); }
+    strokes.forEach(paintStroke);
+  };
+  let saveT = 0; const saveDraft = (withImg) => { clearTimeout(saveT); saveT = setTimeout(() => { const d = store.get(KEY, {}) || {}; if (withImg) d.img = bg ? bg.toDataURL("image/jpeg", 0.8) : null; d.strokes = strokes; store.set(KEY, d); }, 250); };
+  const setBg = c => { bg = c; strokes = []; setSize(); redraw(); fit(); saveDraft(true); };
+  // dimensionamento a proporzioni costanti: la lavagna si adatta allo spazio disponibile senza deformarsi
+  const host = el("div", { cls: "sk-host" }), stage = el("div", { cls: "sk-stage" }, canvas);
+  const fit = () => {
+    const land = matchMedia("(orientation: landscape) and (max-height: 600px)").matches;
+    if (!land) suppress = false;
+    if (land && !full && !suppress) setFull(true, true); else if (!land && full && autoFull) setFull(false);
+    const a = canvas.width / canvas.height; const view = $("#view");
+    const aw = Math.max(50, stage.clientWidth - (full ? 12 : 0));
+    const ah = full ? Math.max(50, stage.clientHeight - 12) : Math.max(200, view.clientHeight - topBar.offsetHeight - tools.offsetHeight - 48);
+    const w = Math.floor(Math.min(aw, ah * a)), h = Math.floor(w / a);
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  };
+  let fitT = 0; const refit = () => { requestAnimationFrame(fit); clearTimeout(fitT); fitT = setTimeout(fit, 350); };
+  const setFull = (on, auto) => { full = on; autoFull = !!(on && auto); host.classList.toggle("full", on); document.body.classList.toggle("sk-lock", on); if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {}); refit(); };
+  // disegno con coordinate normalizzate, indipendenti dalla dimensione a schermo
+  const pos = e => { const r = canvas.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  canvas.addEventListener("pointerdown", e => { e.preventDefault(); drawing = true; try { canvas.setPointerCapture(e.pointerId); } catch (err) {} cur = { c: color, w: thick, p: [pos(e)] }; strokes.push(cur); paintStroke(cur); });
+  canvas.addEventListener("pointermove", e => { if (!drawing) return; const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; const last = cur.p[cur.p.length - 1]; ctx.strokeStyle = cur.c; ctx.lineWidth = cur.w * canvas.width; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); ctx.moveTo(last[0] * canvas.width, last[1] * canvas.height); for (const q of (pts.length ? pts : [e])) { const pt = pos(q); cur.p.push(pt); ctx.lineTo(pt[0] * canvas.width, pt[1] * canvas.height); } ctx.stroke(); });
+  const end = () => { if (!drawing) return; drawing = false; saveDraft(false); };
+  canvas.addEventListener("pointerup", end); canvas.addEventListener("pointercancel", end);
+  // fotocamera dentro l'app: il telefono non passa all'app Fotocamera, quindi la pagina non viene ricaricata e la foto arriva sulla lavagna
+  const stopCam = () => { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; if (camEl) camEl.remove(); camEl = null; };
+  const inpCam = el("input", { type: "file", accept: "image/*", capture: "environment", style: "display:none" });
+  const inpGal = el("input", { type: "file", accept: "image/*", style: "display:none" });
+  const decode = async f => {
+    if (window.createImageBitmap) { try { const b = await createImageBitmap(f, { imageOrientation: "from-image" }); const c = toWork(b, b.width, b.height); if (b.close) b.close(); return c; } catch (err) {} }
+    return new Promise((res, rej) => { const u = URL.createObjectURL(f); const im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(toWork(im, im.naturalWidth, im.naturalHeight)); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error("decode")); }; im.src = u; });
+  };
+  const onFile = async inp => { const f = inp.files && inp.files[0]; inp.value = ""; if (!f) return; try { setBg(await decode(f)); } catch (err) { toast("Questa immagine non si apre, prova con un'altra foto"); } };
+  inpCam.addEventListener("change", () => onFile(inpCam)); inpGal.addEventListener("change", () => onFile(inpGal));
+  const openCam = async () => {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { inpCam.click(); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } }); }
+    catch (err) { stream = null; toast("Fotocamera non disponibile, si apre la scelta della foto"); inpCam.click(); return; }
+    const video = el("video", { playsinline: "", autoplay: "", muted: "" }); video.muted = true; video.srcObject = stream;
+    const shoot = () => { if (!video.videoWidth) return; const c = toWork(video, video.videoWidth, video.videoHeight); stopCam(); setBg(c); };
+    camEl = el("div", { cls: "sk-cam" }, video, el("div", { cls: "bar" }, el("button", { cls: "btn", on: { click: stopCam } }, "Annulla"), el("button", { cls: "sk-shutter", "aria-label": "Scatta la foto", on: { click: shoot } }), el("button", { cls: "btn", on: { click: () => { stopCam(); inpGal.click(); } } }, "Galleria")));
+    document.body.append(camEl); video.play().catch(() => {});
+  };
+  // strumenti
+  const colBtns = [];
+  const pal = el("div", { cls: "sk-pal" });
+  [["#c00000", "strati"], ["#111111", "faglie"], ["#1f78b4", "acqua"], ["#2e7d32", "forme"], ["#ffffff", "note"]].forEach(([c, l]) => { const b = el("button", { cls: "btn sm sk-col" + (c === color ? " on" : ""), "aria-label": l, on: { click: () => { color = c; colBtns.forEach(x => x.classList.toggle("on", x === b)); } } }, el("span", { cls: "dot", style: "background:" + c + ";border:1px solid #999" }), el("span", { cls: "lab" }, l)); colBtns.push(b); pal.append(b); });
+  const thickBtn = el("button", { cls: "btn sm", on: { click: () => { thick = thick > 0.007 ? 0.005 : 0.01; thickBtn.lastChild.textContent = thick > 0.007 ? "Tratto spesso" : "Tratto fine"; } } }, el("span", { cls: "lab" }, "Tratto fine"));
+  const save = async () => { const data = canvas.toDataURL("image/jpeg", 0.85); await NB.add({ ex: ex.id, stop: null, text: "Schizzo panoramico", ts: Date.now(), lat: Geo.pos ? Geo.pos[0] : null, lon: Geo.pos ? Geo.pos[1] : null, photo: data }); toast("Schizzo salvato nel taccuino"); };
+  const acts = el("div", { cls: "sk-acts" },
+    el("button", { cls: "btn sm", on: { click: () => { strokes.pop(); redraw(); saveDraft(false); } } }, "Annulla tratto"),
+    el("button", { cls: "btn sm", on: { click: () => { strokes = []; redraw(); saveDraft(false); } } }, "Pulisci"),
+    thickBtn,
+    el("button", { cls: "btn sm primary", on: { click: save } }, "Salva nel taccuino"),
+    el("button", { cls: "btn sm sk-exit", on: { click: () => { suppress = matchMedia("(orientation: landscape)").matches; setFull(false); } } }, "Esci"));
+  const tools = el("div", { cls: "sk-tools" }, pal, acts);
+  const topBar = el("div", { cls: "row wrap sk-top" },
+    el("button", { cls: "btn", on: { click: openCam }, html: SVG.cam + " Scatta foto" }),
+    el("button", { cls: "btn", on: { click: () => inpGal.click() } }, "Dalla galleria"),
+    el("button", { cls: "btn", on: { click: () => { setFull(true); const d = document.documentElement; if (d.requestFullscreen && !isStandalone()) d.requestFullscreen().catch(() => {}); } }, html: SVG.fit + " Schermo intero" }));
+  host.append(topBar, stage, tools, inpCam, inpGal); p.append(host);
+  // ripristino della bozza salvata
+  const d = store.get(KEY, null);
+  if (d && Array.isArray(d.strokes)) strokes = d.strokes.filter(s => s && Array.isArray(s.p) && s.p.length && s.p[0][0] <= 1);
+  if (d && d.img) { const im = new Image(); im.onload = () => { bg = toWork(im, im.naturalWidth, im.naturalHeight); setSize(); redraw(); fit(); }; im.src = d.img; }
+  setSize(); redraw();
+  const ro = window.ResizeObserver ? new ResizeObserver(refit) : null; if (ro) ro.observe(stage);
+  window.addEventListener("resize", refit); window.addEventListener("orientationchange", refit);
+  setTimeout(fit, 30);
+  onLeave(() => { stopCam(); if (ro) ro.disconnect(); window.removeEventListener("resize", refit); window.removeEventListener("orientationchange", refit); document.body.classList.remove("sk-lock"); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); });
 }
 
 /* ------------------------------------------------------------------ taccuino (IndexedDB) */
@@ -568,21 +636,21 @@ function teacherView(ex) {
   }
   p.append(el("div", { cls: "row", style: "margin-bottom:10px" }, el("p", { cls: "lead grow", style: "margin:0" }, "Note per le spiegazioni in pullman, un blocco per ogni sosta."), el("button", { cls: "btn sm", on: { click: () => { store.set("docente", false); render(); } } }, "Esci")));
   ex.teacher.forEach((b, i) => p.append(el("details", i === 0 ? { open: "" } : null, el("summary", null, b.h), el("div", { cls: "body" }, el("ul", { cls: "dots small" }, ...b.items.map(t => el("li", null, t)))))));
-  p.append(el("div", { cls: "box small", style: "margin-top:14px" }, el("h4", null, "Audio delle tappe"), "Per aggiungere l'introduzione audio a una tappa basta caricare nel sito un file audio/" + ex.id + "_N.m4a (N numero della tappa): l'app lo trova da sola."));
+  p.append(el("div", { cls: "box small", style: "margin-top:14px" }, el("h4", null, "Audio delle tappe"), "Le introduzioni audio delle tappe sono lette da una voce sintetica a partire dai testi della guida. Per sostituirne una con la propria voce basta caricare nel sito un file audio/" + ex.id + "_N.m4a, dove N è il numero della tappa, al posto di quello esistente; l'app lo usa da sola."));
 }
 
 function moreView(ex) {
   setTitle("Altro", ex ? ex.title : "Paesaggi in campo");
   const exId = ex ? ex.id : cur.exId;
   const p = page();
-  const items = [[exId ? "#/" + exId + "/taccuino" : "#/taccuino", "Taccuino di campo", "appunti, misure e foto"], ["#/installa", "Come si installa", "istruzioni per ogni browser, con le schermate"], ["#/controllo", "Controllo di partenza", "posizione, bussola, carte e figure senza rete"], [exId ? "#/" + exId + "/docente" : "#/", "Modalità docente", "note per le spiegazioni in pullman (PIN)"], ["#/", "Cambia escursione", "Vajont o Carso Classico"]];
+  const items = [[exId ? "#/" + exId + "/taccuino" : "#/taccuino", "Taccuino di campo", "appunti, misure e foto"], ["#/installa", "Come si installa", "istruzioni per ogni browser, con le schermate"], ["#/controllo", "Controllo di partenza", "posizione, bussola, carte, figure e audio senza rete"], [exId ? "#/" + exId + "/docente" : "#/", "Modalità docente", "note per le spiegazioni in pullman (PIN)"], ["#/", "Cambia escursione", "Vajont o Carso Classico"]];
   for (const [h, t, d] of items) p.append(el("a", { cls: "card tap", href: h, style: "display:block;text-decoration:none;color:inherit" }, el("b", null, t), el("div", { cls: "small muted" }, d)));
   const big = store.get("big", false), theme = store.get("theme", "auto");
   p.append(el("div", { cls: "card" }, el("h3", null, "Lettura"),
     el("div", { cls: "row", style: "margin-bottom:8px" }, el("span", { cls: "grow" }, "Testo grande"), el("button", { cls: "btn sm " + (big ? "navy" : ""), on: { click: e => { const v = !store.get("big", false); store.set("big", v); applyPrefs(); e.currentTarget.className = "btn sm " + (v ? "navy" : ""); } } }, big ? "Sì" : "No")),
     el("div", { cls: "row" }, el("span", { cls: "grow" }, "Tema"), ...["auto", "light", "dark"].map(t => el("button", { cls: "btn sm " + (theme === t ? "navy" : ""), on: { click: e => { store.set("theme", t); applyPrefs(); e.currentTarget.parentNode.querySelectorAll("button").forEach(b => b.className = "btn sm"); e.currentTarget.className = "btn sm navy"; } } }, { auto: "automatico", light: "chiaro", dark: "scuro" }[t])))));
   if (exId) p.append(el("div", { cls: "card" }, el("h3", null, "Stato delle tappe"), el("p", { cls: "small muted" }, "Azzera le tappe segnate come fatte, per esempio all'inizio di una nuova giornata."), el("button", { cls: "btn sm", on: { click: () => { store.set("done." + exId, []); toast("Tappe azzerate"); } } }, "Azzera")));
-  p.append(el("div", { cls: "card small" }, el("h3", null, "Crediti"), el("p", null, "Testi, figure e strutturazione didattica dalle guide dell'escursione del corso «Analisi e interpretazione dei paesaggi naturali» (A. Bondesan, DiSSGeA, Università di Padova). Le fonti scientifiche sono indicate in ogni didascalia e nei riferimenti bibliografici delle guide in PDF."), el("p", null, "Cartografia di base: © OpenStreetMap contributors (ODbL); rilievo OpenTopoMap (CC-BY-SA). Libreria cartografica Leaflet (BSD). Gli overlay geologici e geomorfologici sono schematici, digitalizzati dalle figure citate, con la precisione indicata in ogni elemento; servono all'orientamento sul terreno e sostituiscono le carte originali soltanto per questo scopo."), el("p", { style: "margin:0" }, "Versione " + VERSION + ".")));
+  p.append(el("div", { cls: "card small" }, el("h3", null, "Crediti"), el("p", null, "Testi, figure e strutturazione didattica dalle guide dell'escursione del corso «Analisi e interpretazione dei paesaggi naturali» (A. Bondesan, DiSSGeA, Università di Padova). Le fonti scientifiche sono indicate in ogni didascalia e nei riferimenti bibliografici delle guide in PDF."), el("p", null, "Cartografia di base: © OpenStreetMap contributors (ODbL); rilievo OpenTopoMap (CC-BY-SA). Libreria cartografica Leaflet (BSD). Introduzioni audio sintetizzate con Piper, voce italiana «serena» (dataset CC BY 4.0). Gli overlay geologici e geomorfologici sono schematici, digitalizzati dalle figure citate, con la precisione indicata in ogni elemento; servono all'orientamento sul terreno e sostituiscono le carte originali soltanto per questo scopo."), el("p", { style: "margin:0" }, "Versione " + VERSION + ".")));
 }
 
 function applyPrefs() { document.documentElement.dataset.big = store.get("big", false) ? "1" : ""; const t = store.get("theme", "auto"); if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; }
@@ -599,6 +667,9 @@ const Viewer = {
     st.addEventListener("wheel", e => { e.preventDefault(); const r = st.getBoundingClientRect(); this.zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); this.apply(); }, { passive: false });
     let lastTap = 0; st.addEventListener("pointerup", e => { const t = Date.now(); if (t - lastTap < 300) { const r = st.getBoundingClientRect(); if (this.s > this.fitScale * 1.5) this.fit(); else { this.zoomAt(2.5, e.clientX - r.left, e.clientY - r.top); this.apply(); } } lastTap = t; });
     document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#viewer").classList.contains("on")) this.close(); });
+    // alla rotazione la figura si riadatta allo schermo mantenendo le proporzioni
+    let rt = 0; const refit = () => { if (!$("#viewer").classList.contains("on")) return; requestAnimationFrame(() => this.fit()); clearTimeout(rt); rt = setTimeout(() => this.fit(), 350); };
+    window.addEventListener("resize", refit); window.addEventListener("orientationchange", refit);
   },
   zoomAt(k, x, y) { const ns = Math.max(this.fitScale * 0.8, Math.min(this.fitScale * 12, this.s * k)); k = ns / this.s; this.tx = x - (x - this.tx) * k; this.ty = y - (y - this.ty) * k; this.s = ns; },
   apply() { this.img.style.transform = "translate(" + this.tx + "px," + this.ty + "px) scale(" + this.s + ")"; },
@@ -750,7 +821,7 @@ const Offline = {
     return [...out];
   },
   list(ex) {
-    const imgs = [...new Set([...ex.figures.map(f => "img/" + f.id + ".jpg"), ...ex.figures.map(f => "img/thumb/" + f.id + ".jpg"), ex.cover, "img/ritrovo1.jpg", "img/ritrovo2.jpg", ...(ex.id === "vajont" ? ["img/ba_sezione_prima.jpg", "img/ba_sezione_dopo.jpg", "img/cmp_longarone_prima.jpg", "img/cmp_longarone_dopo.jpg", "img/seq_toc_1964.jpg", "img/seq_toc_1985.jpg", "img/seq_toc_1993.jpg", "img/seq_toc_2002.jpg", "img/seq_toc_2011.jpg"] : [])])];
+    const imgs = [...new Set([...ex.figures.map(f => "img/" + f.id + ".jpg"), ...ex.figures.map(f => "img/thumb/" + f.id + ".jpg"), ex.cover, "img/ritrovo1.jpg", "img/ritrovo2.jpg", ...Object.keys((window.DATA.audio || {})[ex.id] || {}).map(n => "audio/" + ex.id + "_" + n + ".m4a"), ...(ex.id === "vajont" ? ["img/ba_sezione_prima.jpg", "img/ba_sezione_dopo.jpg", "img/cmp_longarone_prima.jpg", "img/cmp_longarone_dopo.jpg", "img/seq_toc_1964.jpg", "img/seq_toc_1985.jpg", "img/seq_toc_1993.jpg", "img/seq_toc_2002.jpg", "img/seq_toc_2011.jpg"] : [])])];
     return [...this.tileUrls(ex.id).map(u => ({ u, c: this.TILES, k: this.tileKey(u) })), ...imgs.map(u => ({ u, c: this.IMGS, k: new URL(u, location.href).href }))];
   },
   async status(ex) {
@@ -802,8 +873,8 @@ function controlloView() {
     const st = await Offline.status(exk); if (gen !== drawGen) return; const pct = Math.round(st.done / st.total * 100);
     res.off = pct >= 97;
     const bar = el("div", { cls: "progress", style: "margin-top:6px" }, el("i", { style: "width:" + pct + "%" }));
-    const btn = el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: async () => { btn.disabled = true; btn.textContent = "Scaricamento…"; await Offline.prefetch(exk, (n, t) => { bar.firstChild.style.width = Math.round(n / t * 100) + "%"; btn.textContent = "Scaricamento… " + Math.round(n / t * 100) + "%"; }); draw(); } } }, pct > 0 ? "Completa lo scaricamento" : "Scarica carte e figure");
-    out.append(row(res.off, "Carte e figure senza rete, " + exk.title, pct + "% scaricato (" + st.done + " di " + st.total + " elementi, circa 20 MB). Meglio con il Wi-Fi.", el("div", null, bar, res.off ? null : btn)));
+    const btn = el("button", { cls: "btn sm primary", style: "margin-top:6px", on: { click: async () => { btn.disabled = true; btn.textContent = "Scaricamento…"; await Offline.prefetch(exk, (n, t) => { bar.firstChild.style.width = Math.round(n / t * 100) + "%"; btn.textContent = "Scaricamento… " + Math.round(n / t * 100) + "%"; }); draw(); } } }, pct > 0 ? "Completa lo scaricamento" : "Scarica carte, figure e audio");
+    out.append(row(res.off, "Carte, figure e audio senza rete, " + exk.title, pct + "% scaricato (" + st.done + " di " + st.total + " elementi, circa 25 MB). Meglio con il Wi-Fi.", el("div", null, bar, res.off ? null : btn)));
     // 5. memoria
     let pers = null; try { if (navigator.storage && navigator.storage.persisted) pers = await navigator.storage.persisted(); } catch (e) {}
     if (gen !== drawGen) return;
@@ -885,7 +956,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.2";
+const VERSION = "1.3";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
@@ -897,7 +968,7 @@ if ("serviceWorker" in navigator) {
     }).catch(() => {});
   });
 }
-window.addEventListener("online", () => toast("Connessione ripristinata")); window.addEventListener("offline", () => toast("Sei offline: carte e figure salvate restano disponibili"));
+window.addEventListener("online", () => toast("Connessione ripristinata")); window.addEventListener("offline", () => toast("Sei senza rete; carte, figure e audio salvati restano disponibili"));
 applyPrefs(); Viewer.init(); render();
 // se il permesso è già stato concesso in una sessione precedente, la posizione riparte da sola
 if (navigator.permissions && navigator.permissions.query) navigator.permissions.query({ name: "geolocation" }).then(p => { if (p.state === "granted" && store.get("geoAuto", true)) Geo.start(); }).catch(() => {});

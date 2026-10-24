@@ -252,3 +252,46 @@ textarea.note { width: 100%; min-height: 90px; padding: 10px; border-radius: 10p
   body { background: #fff; color: #000; }
   .card { box-shadow: none; border: 1px solid #ccc; }
 }
+
+/* Schizzo panoramico */
+.sk-top { margin-bottom: 10px; }
+.sk-stage { display: flex; justify-content: center; align-items: center; }
+.sk-canvas { display: block; border-radius: 10px; touch-action: none; background: var(--soft); box-shadow: var(--shadow); max-width: 100%; }
+.sk-tools { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sk-pal, .sk-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sk-col.on { border-color: var(--ink) !important; box-shadow: inset 0 0 0 2px var(--ink); }
+.sk-exit { display: none !important; }
+body.sk-lock { overflow: hidden; }
+.sk-host.full { position: fixed; inset: 0; z-index: 250; background: #101317; display: flex; flex-direction: column; padding: var(--sat) env(safe-area-inset-right, 0px) var(--sab) env(safe-area-inset-left, 0px); }
+.sk-host.full .sk-top { display: none; }
+.sk-host.full .sk-stage { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.sk-host.full .sk-canvas { border-radius: 4px; box-shadow: none; }
+.sk-host.full .sk-tools { margin: 0; padding: 6px 8px; background: #1b2026; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.sk-host.full .sk-exit { display: inline-flex !important; }
+.sk-host.full .sk-col .lab { display: none; }
+.sk-host.full .sk-col.on { border-color: #fff !important; box-shadow: inset 0 0 0 2px #fff; }
+.sk-host.full .btn { background: #2a3038; color: #fff; border-color: #3a424c; }
+.sk-host.full .btn.primary { background: var(--red); border-color: var(--red); }
+@media (orientation: landscape) {
+  .sk-host.full { flex-direction: row; }
+  .sk-host.full .sk-tools { flex-direction: column; flex-wrap: nowrap; justify-content: flex-start; width: 132px; overflow-y: auto; }
+  .sk-host.full .sk-pal { justify-content: center; }
+  .sk-host.full .sk-acts { flex-direction: column; }
+  .sk-host.full .sk-acts .btn { width: 100%; }
+}
+.sk-cam { position: fixed; inset: 0; z-index: 320; background: #000; display: flex; flex-direction: column; }
+.sk-cam video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+.sk-cam .bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px calc(var(--sab) + 14px); }
+.sk-cam .btn { background: #2a3038; color: #fff; border-color: #3a424c; min-width: 92px; }
+.sk-shutter { width: 74px; height: 74px; border-radius: 50%; border: 5px solid #fff; background: var(--red); cursor: pointer; }
+@media (orientation: landscape) and (max-height: 600px) {
+  .sk-cam { flex-direction: row; }
+  .sk-cam video { height: 100%; width: auto; flex: 1; }
+  .sk-cam .bar { flex-direction: column-reverse; padding: 20px calc(env(safe-area-inset-right, 0px) + 14px) 20px 14px; }
+}
+#toast { z-index: 400; }
+@media (orientation: landscape) and (max-height: 600px) {
+  #viewer .stage { position: absolute; inset: 0; }
+  #viewer .vtop { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: linear-gradient(rgba(11,13,16,.75), rgba(11,13,16,0)); }
+  #viewer .vcap { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; max-height: 20vh; background: rgba(20,24,29,.78); font-size: .8em; padding: 6px 14px calc(var(--sab) + 6px); }
+}
