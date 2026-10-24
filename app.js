@@ -64,7 +64,8 @@ const SVG = {
 
 /* ------------------------------------------------------------------ geolocalizzazione */
 const Geo = {
-  pos: null, acc: null, heading: null, speed: null, compass: null, watchId: null, listeners: new Set(), headFns: new Set(), err: null, compassOn: false, compassState: "off", compassAbs: false, _sx: 0, _sy: 0, _emitT: 0,
+  pos: null, acc: null, heading: null, speed: null, compass: null, watchId: null, listeners: new Set(), headFns: new Set(), err: null, compassOn: false, compassState: "off", compassAbs: false, _sx: 0, _sy: 0, _emitT: 0, aos: null, absT: 0,
+  diag: { abs: 0, absNull: 0, rel: 0, relAbs: 0, wk: 0, aos: 0, aosErr: "", perm: "", src: "", last: null },
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
   onHeading(fn) { this.headFns.add(fn); return () => this.headFns.delete(fn); },
   emit() { this.listeners.forEach(f => { try { f(this); } catch (e) { console.error(e); } }); },
@@ -81,33 +82,75 @@ const Geo = {
   stop() { if (this.watchId != null) navigator.geolocation.clearWatch(this.watchId); this.watchId = null; $("#btnGps").style.color = ""; this.emit(); },
   active() { return this.watchId != null; },
   // bussola: le letture (fino a 60 al secondo) vanno solo a chi disegna la direzione; le altre viste si aggiornano al massimo una volta al secondo
+  // direzione verso cui guarda il telefono: il lato alto dello schermo quando è piatto, la fotocamera posteriore quando è in piedi;
+  // si calcola dalla matrice di rotazione (alpha, beta, gamma) e resta stabile anche col telefono inclinato, dove 360 - alpha sbaglia
+  headingFromAxes(X, Y, Z) {
+    const so = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180;
+    const ux = Math.cos(so) * Y[0] + Math.sin(so) * X[0], uy = Math.cos(so) * Y[1] + Math.sin(so) * X[1];
+    const E = ux - Z[0], N = uy - Z[1]; if (Math.hypot(E, N) < 0.15) return null;
+    return (Math.atan2(E, N) * 180 / Math.PI + 360) % 360;
+  },
+  headingFromEuler(al, be, ga) {
+    const d = Math.PI / 180, cA = Math.cos(al * d), sA = Math.sin(al * d), cB = Math.cos(be * d), sB = Math.sin(be * d), cG = Math.cos(ga * d), sG = Math.sin(ga * d);
+    return this.headingFromAxes([cA * cG - sA * sB * sG, cG * sA + cA * sB * sG, -cB * sG], [-cB * sA, cA * cB, sB], [cG * sA * sB + cA * sG, sA * sG - cA * cG * sB, cB * cG]);
+  },
+  headingFromQuat(q) {
+    const [x, y, z, w] = q;
+    return this.headingFromAxes([1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)], [2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)], [2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)]);
+  },
+  feedHeading(hd, src) {
+    const r = hd * Math.PI / 180;
+    // smorzamento a tempo: il tremolio sparisce in circa due decimi di secondo, e dopo una pausa nelle letture la rosa salta subito al valore nuovo
+    const now0 = performance.now(), dt = (now0 - (this._ht || 0)) / 1000; this._ht = now0;
+    const k = this.compass == null || dt > 0.6 ? 1 : 1 - Math.exp(-dt / 0.12);
+    this._sx = this._sx * (1 - k) + Math.sin(r) * k; this._sy = this._sy * (1 - k) + Math.cos(r) * k;
+    this.compass = (Math.atan2(this._sx, this._sy) * 180 / Math.PI + 360) % 360; this.compassState = "ok"; this.diag.src = src;
+    this.headFns.forEach(f => { try { f(this); } catch (err) { console.error(err); } });
+    const now = Date.now(); if (now - this._emitT > 1000) { this._emitT = now; this.emit(); }
+  },
   startCompass(gesture) {
     const needPerm = typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function";
-    const tell = () => this.headFns.forEach(f => { try { f(this); } catch (err) { console.error(err); } });
-    const setState = st => { this.compassState = st; tell(); };
-    // i ricevitori dei sensori si attaccano subito e sempre: se il telefono manda letture la bussola funziona, qualunque cosa risponda la richiesta di permesso
+    const D = this.diag, setState = st => { this.compassState = st; this.headFns.forEach(f => { try { f(this); } catch (err) {} }); };
+    // ricevitori sempre attivi: eventi di orientamento assoluto (Chrome), bussola di Safari, e in riserva il sensore di orientamento assoluto
     if (!this.compassOn) {
       this.compassOn = true; setState("wait");
-      const h = e => {
-        let hd = null;
-        if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0) hd = e.webkitCompassHeading;
-        else if (e.alpha != null && (e.type === "deviceorientationabsolute" || e.absolute === true)) hd = (360 - e.alpha) % 360;
-        if (e.type === "deviceorientationabsolute" && e.alpha != null) this.compassAbs = true;
-        if (hd == null) { if (e.alpha != null && this.compassState !== "ok" && this.compassState !== "rel") setState("rel"); return; }
-        const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-        const r = ((hd + so + 360) % 360) * Math.PI / 180;
-        if (this.compass == null) { this._sx = Math.sin(r); this._sy = Math.cos(r); } else { this._sx = this._sx * 0.75 + Math.sin(r) * 0.25; this._sy = this._sy * 0.75 + Math.cos(r) * 0.25; }
-        this.compass = (Math.atan2(this._sx, this._sy) * 180 / Math.PI + 360) % 360; this.compassState = "ok"; tell();
-        const now = Date.now(); if (now - this._emitT > 1000) { this._emitT = now; this.emit(); }
+      const onAbs = e => {
+        if (e.alpha == null) { D.absNull++; return; }
+        D.abs++; D.last = [e.alpha, e.beta, e.gamma]; this.compassAbs = true; this.absT = Date.now();
+        const hd = this.headingFromEuler(e.alpha, e.beta || 0, e.gamma || 0); if (hd != null) this.feedHeading(hd, "evento assoluto");
       };
-      if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", h, true);
-      window.addEventListener("deviceorientation", e => { if (!this.compassAbs) h(e); }, true);
+      const onRel = e => {
+        if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0) {
+          D.wk++; const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0; this.feedHeading((e.webkitCompassHeading + so) % 360, "bussola di Safari"); return;
+        }
+        if (e.alpha == null) return;
+        if (e.absolute === true) { D.relAbs++; onAbs({ alpha: e.alpha, beta: e.beta, gamma: e.gamma }); return; }
+        D.rel++; if (!this.compassAbs && this.compassState === "wait") setState("rel");
+      };
+      if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", onAbs, true);
+      window.addEventListener("deviceorientation", onRel, true);
+      this.startAOS();
       setTimeout(() => { if (this.compassState === "wait") setState(needPerm && !gesture ? "perm" : "none"); }, 4000);
-    }
+    } else if (gesture) this.startAOS(true);
     if (!needPerm || this.compassState === "ok") return;
-    // Safari su iPhone, e ora anche Chrome, espongono la richiesta di permesso; senza un tocco può essere rifiutata, e allora il mirino mostra il pulsante «Attiva la bussola»
-    const fail = () => { if (this.compassState !== "ok" && this.compassState !== "rel") setState(gesture ? "denied" : "perm"); };
-    try { DeviceOrientationEvent.requestPermission().then(st => { if (st !== "granted") setTimeout(fail, 600); }).catch(() => setTimeout(fail, 600)); } catch (e) { fail(); }
+    // la richiesta chiede anche il magnetometro (absolute = true); su iPhone il parametro viene ignorato
+    const fail = () => { if (this.compassState !== "ok") setState(gesture ? (this.compassState === "rel" ? "rel" : "denied") : "perm"); };
+    try { DeviceOrientationEvent.requestPermission(true).then(st => { D.perm = st; if (st !== "granted") setTimeout(fail, 600); else if (gesture) this.startAOS(true); }).catch(err => { D.perm = "errore " + (err && err.name || ""); setTimeout(fail, 600); }); } catch (e) { fail(); }
+  },
+  startAOS(retry) {
+    if (typeof AbsoluteOrientationSensor !== "function" || (this.aos && !retry)) return;
+    try {
+      if (this.aos) { try { this.aos.stop(); } catch (e) {} }
+      const s = new AbsoluteOrientationSensor({ frequency: 30, referenceFrame: "device" });
+      s.addEventListener("reading", () => {
+        this.diag.aos++; if (!s.quaternion) return;
+        // il sensore serve solo se gli eventi assoluti non arrivano
+        if (Date.now() - this.absT < 1500) return;
+        const hd = this.headingFromQuat(s.quaternion); if (hd != null) this.feedHeading(hd, "sensore di orientamento");
+      });
+      s.addEventListener("error", e => { this.diag.aosErr = (e.error && (e.error.name + " " + (e.error.message || ""))) || "errore"; });
+      s.start(); this.aos = s;
+    } catch (e) { this.diag.aosErr = e.name || "non disponibile"; }
   },
   bestHeading() { return this.compass != null ? this.compass : this.heading; }
 };
@@ -480,7 +523,7 @@ function compassView(ex, stopN) {
   const cw = el("div", { cls: "compass" }); p.append(cw);
   const read = el("div", { style: "text-align:center;margin:-4px 0 10px" }); p.append(read);
   const tl = el("ul", { cls: "clean tlist" }); p.append(el("div", { cls: "card" }, tl));
-  p.append(el("div", { cls: "box small" }, el("h4", null, "Come si usa"), "Tieni il telefono piatto davanti a te. La rosa ruota con la bussola e, quando il punto colorato di un bersaglio arriva sotto il triangolo rosso, il bersaglio è davanti a te. Se sei a più di tre chilometri dalla tappa gli azimut sono calcolati dal punto di sosta. Vicino a metalli e magneti, compreso l'interno del pullman, la bussola del telefono può sbagliare di parecchi gradi; per ricalibrarla muovi il telefono disegnando un otto."));
+  p.append(el("div", { cls: "box small" }, el("h4", null, "Come si usa"), "Tieni il telefono piatto davanti a te, oppure in piedi con la fotocamera rivolta al paesaggio. La rosa ruota con la bussola e, quando il punto colorato di un bersaglio arriva sotto il triangolo rosso, il bersaglio è davanti a te. Se sei a più di tre chilometri dalla tappa gli azimut sono calcolati dal punto di sosta. Vicino a metalli e magneti, compreso l'interno del pullman, la bussola del telefono può sbagliare di parecchi gradi; per ricalibrarla muovi il telefono disegnando un otto."));
   Geo.start(); Geo.startCompass();
   const targets = stop.targets.map(k => ex.targets[k]).filter(Boolean);
   const NEAR = 3000, warn = { cls: "small", style: "color:var(--warn);margin:0 0 8px" };
@@ -518,10 +561,16 @@ function compassView(ex, stopN) {
     if (st === "wait" || st === "off") state.append(el("p", { cls: "small muted", style: "margin:0 0 8px" }, "In attesa della bussola del telefono…"));
     else if (st === "perm") state.append(el("button", { cls: "btn primary block", style: "margin-bottom:8px", on: { click: () => Geo.startCompass(true) } }, "Attiva la bussola"));
     else if (st === "denied") state.append(el("p", warn, "Il permesso ai sensori di movimento è stato negato. Va concesso di nuovo nelle impostazioni del browser per questo sito; poi chiudi e riapri l'app."));
-    else if (st === "rel") state.append(el("p", warn, "Il telefono segnala come ruota ma non dove sta il nord, quindi la rosa resta ferma. Muovi il telefono disegnando un otto per calibrare la bussola; se non basta, usa gli azimut della lista con una bussola a mano."));
-    else if (st === "none") state.append(el("p", warn, "Nessun segnale dalla bussola. Muovi il telefono disegnando un otto; se la rosa resta ferma, controlla nelle impostazioni del sito in Chrome che i sensori di movimento siano consentiti, poi chiudi e riapri l'app. Alcuni tablet non hanno il sensore."));
+    else if (st === "rel") state.append(el("p", warn, "Il telefono segnala come ruota ma non ancora dove sta il nord. Tocca «Attiva la bussola» e consenti i sensori; poi muovi il telefono disegnando un otto per calibrare la bussola."), el("button", { cls: "btn primary block", style: "margin-bottom:8px", on: { click: () => Geo.startCompass(true) } }, "Attiva la bussola"));
+    else if (st === "none") state.append(el("p", warn, "Nessun segnale dalla bussola. Tocca «Attiva la bussola», poi muovi il telefono disegnando un otto; se la rosa resta ferma, controlla nelle impostazioni del sito in Chrome che i sensori di movimento siano consentiti, poi chiudi e riapri l'app. Alcuni tablet non hanno il sensore."), el("button", { cls: "btn primary block", style: "margin-bottom:8px", on: { click: () => Geo.startCompass(true) } }, "Attiva la bussola"));
   };
   const onHead = () => { if (!raf) raf = requestAnimationFrame(paint); };
+  // dati grezzi dei sensori: servono a capire, da una schermata, perché su un telefono la rosa resta ferma
+  const dg = el("pre", { cls: "small", style: "white-space:pre-wrap;margin:6px 0 0;font-size:.78em" });
+  p.append(el("details", { cls: "card small" }, el("summary", null, "Dati dei sensori"), dg));
+  const fmt = v => v == null ? "–" : Math.round(v);
+  const dpaint = () => { const D = Geo.diag; dg.textContent = "Versione " + VERSION + "\nStato bussola: " + Geo.compassState + (D.src ? ", da " + D.src : "") + "\nEventi assoluti: " + D.abs + " (vuoti " + D.absNull + ")\nEventi relativi: " + D.rel + ", con nord " + D.relAbs + ", Safari " + D.wk + "\nSensore di orientamento: " + (typeof AbsoluteOrientationSensor === "function" ? D.aos + " letture" + (D.aosErr ? ", " + D.aosErr : "") : "assente") + "\nPermesso: " + (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function" ? (D.perm || "non ancora chiesto") : "non richiesto") + "\nUltima lettura: " + (D.last ? "alpha " + fmt(D.last[0]) + ", beta " + fmt(D.last[1]) + ", gamma " + fmt(D.last[2]) : "nessuna") + "\nDirezione: " + fmt(Geo.compass) + "°, schermo " + ((screen.orientation && screen.orientation.angle) || 0) + "°\n" + navigator.userAgent; };
+  dpaint(); const dT = setInterval(dpaint, 500); onLeave(() => clearInterval(dT));
   build(); onLeave(Geo.on(build)); onLeave(Geo.onHeading(onHead)); onLeave(() => { if (raf) cancelAnimationFrame(raf); });
 }
 
@@ -1040,14 +1089,14 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.3.2";
+const VERSION = "1.3.3";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register("sw.js").then(reg => {
-      reg.addEventListener("updatefound", () => { const w = reg.installing; if (!w) return; w.addEventListener("statechange", () => { if (w.state === "activated" && hadController) toast("È disponibile una versione aggiornata dell'app", "Aggiorna", () => location.reload(), 20000); }); });
+      reg.addEventListener("updatefound", () => { const w = reg.installing; if (!w) return; w.addEventListener("statechange", () => { if (w.state === "activated" && hadController && !/taccuino|schizzo/.test(location.hash)) { location.reload(); return; } if (w.state === "activated" && hadController) toast("È disponibile una versione aggiornata dell'app", "Aggiorna", () => location.reload(), 20000); }); });
       setInterval(() => reg.update().catch(() => {}), 3600000);
     }).catch(() => {});
   });
