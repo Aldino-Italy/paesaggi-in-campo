@@ -1,6 +1,6 @@
 /* Paesaggi in campo. Service worker: guscio dell'app precaricato, figure e tessere di carta salvate quando vengono viste
    o quando l'utente le scarica in blocco da «Prepara l'uso offline». */
-const V = "v1.2.5";
+const V = "v1.2.6";
 const SHELL = "pic-shell-" + V, TILES = "pic-tiles-v1", IMGS = "pic-imgs-v1";
 const SHELL_FILES = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "data/vajont.js", "data/carso.js", "data/routes.js", "data/installa.js", "data/audio.js",
   "vendor/leaflet.js", "vendor/leaflet.css", "vendor/images/marker-icon.png", "vendor/images/marker-icon-2x.png", "vendor/images/marker-shadow.png", "vendor/images/layers.png", "vendor/images/layers-2x.png",
@@ -56,5 +56,14 @@ self.addEventListener("fetch", e => {
     const hit = await c.match(req, { ignoreSearch: true }); if (hit) { fetch(req).then(r => { if (r.ok) c.put(req, r.clone()); }).catch(() => {}); return hit; }
     try { const r = await fetch(req); if (r.ok) c.put(req, r.clone()); return r; }
     catch (err) { if (req.mode === "navigate") return c.match("index.html"); return new Response("", { status: 504 }); }
+  }));
+});
+
+// tocco sulla notifica di un avviso: riporta in primo piano l'app e apre la pagina giusta
+self.addEventListener("notificationclick", e => {
+  e.notification.close(); const hash = (e.notification.data && e.notification.data.hash) || "#/";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    const c = list[0]; if (c) { c.postMessage({ go: hash }); return c.focus(); }
+    return self.clients.openWindow(self.registration.scope + hash);
   }));
 });

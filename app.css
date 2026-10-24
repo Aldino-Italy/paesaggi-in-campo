@@ -295,3 +295,4 @@ body.sk-lock { overflow: hidden; }
   #viewer .vtop { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: linear-gradient(rgba(11,13,16,.75), rgba(11,13,16,0)); }
   #viewer .vcap { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; max-height: 20vh; background: rgba(20,24,29,.78); font-size: .8em; padding: 6px 14px calc(var(--sab) + 6px); }
 }
+#sndbar { position: fixed; left: 0; right: 0; top: calc(var(--top-h) + var(--sat)); z-index: 60; border: 0; background: var(--red); color: #fff; font-weight: 600; padding: 12px 14px; font-size: .92em; text-align: center; cursor: pointer; }

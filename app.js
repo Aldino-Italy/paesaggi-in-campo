@@ -82,18 +82,18 @@ const Geo = {
   active() { return this.watchId != null; },
   // bussola: le letture (fino a 60 al secondo) vanno solo a chi disegna la direzione; le altre viste si aggiornano al massimo una volta al secondo
   startCompass(gesture) {
-    if (this.compassOn) return;
     const needPerm = typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function";
     const tell = () => this.headFns.forEach(f => { try { f(this); } catch (err) { console.error(err); } });
     const setState = st => { this.compassState = st; tell(); };
-    const go = () => {
-      if (this.compassOn) return; this.compassOn = true; setState("wait");
+    // i ricevitori dei sensori si attaccano subito e sempre: se il telefono manda letture la bussola funziona, qualunque cosa risponda la richiesta di permesso
+    if (!this.compassOn) {
+      this.compassOn = true; setState("wait");
       const h = e => {
         let hd = null;
         if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0) hd = e.webkitCompassHeading;
         else if (e.alpha != null && (e.type === "deviceorientationabsolute" || e.absolute === true)) hd = (360 - e.alpha) % 360;
         if (e.type === "deviceorientationabsolute" && e.alpha != null) this.compassAbs = true;
-        if (hd == null) { if (e.alpha != null && this.compassState === "wait") setState("rel"); return; }
+        if (hd == null) { if (e.alpha != null && this.compassState !== "ok" && this.compassState !== "rel") setState("rel"); return; }
         const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
         const r = ((hd + so + 360) % 360) * Math.PI / 180;
         if (this.compass == null) { this._sx = Math.sin(r); this._sy = Math.cos(r); } else { this._sx = this._sx * 0.75 + Math.sin(r) * 0.25; this._sy = this._sy * 0.75 + Math.cos(r) * 0.25; }
@@ -102,11 +102,12 @@ const Geo = {
       };
       if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", h, true);
       window.addEventListener("deviceorientation", e => { if (!this.compassAbs) h(e); }, true);
-      setTimeout(() => { if (this.compassState === "wait") setState("none"); }, 4000);
-    };
-    if (!needPerm) return go();
-    // Chrome concede il permesso anche senza tocco; Safari su iPhone lo chiede solo dopo un tocco, e allora il mirino mostra il pulsante «Attiva la bussola»
-    DeviceOrientationEvent.requestPermission().then(st => { if (st === "granted") go(); else setState("denied"); }).catch(() => setState(gesture ? "denied" : "perm"));
+      setTimeout(() => { if (this.compassState === "wait") setState(needPerm && !gesture ? "perm" : "none"); }, 4000);
+    }
+    if (!needPerm || this.compassState === "ok") return;
+    // Safari su iPhone, e ora anche Chrome, espongono la richiesta di permesso; senza un tocco può essere rifiutata, e allora il mirino mostra il pulsante «Attiva la bussola»
+    const fail = () => { if (this.compassState !== "ok" && this.compassState !== "rel") setState(gesture ? "denied" : "perm"); };
+    try { DeviceOrientationEvent.requestPermission().then(st => { if (st !== "granted") setTimeout(fail, 600); }).catch(() => setTimeout(fail, 600)); } catch (e) { fail(); }
   },
   bestHeading() { return this.compass != null ? this.compass : this.heading; }
 };
@@ -119,14 +120,14 @@ const Fence = {
     for (const s of ex.stops) {
       const d = haversine(Geo.pos, s.coords);
       if (d <= s.radius && now - (this.last["s" + s.id] || 0) > 15 * 60000) {
-        this.last["s" + s.id] = now; alertUser();
+        this.last["s" + s.id] = now; alertUser("Tappa " + s.n, "Sei alla tappa " + s.n + ", " + s.name, "#/" + ex.id + "/tappa/" + s.n);
         toast("Sei alla tappa " + s.n + ", " + s.name, "Apri", () => go("#/" + ex.id + "/tappa/" + s.n), 12000);
       }
     }
     if (store.get("bus", false)) ex.windows.forEach((w, i) => {
       const d = haversine(Geo.pos, w.coords);
       if (d <= w.radius && now - (this.last["w" + i] || 0) > 30 * 60000) {
-        this.last["w" + i] = now; alertUser();
+        this.last["w" + i] = now; alertUser("Dal finestrino", w.name, "#/" + ex.id + "/finestrino/" + i);
         toast("Dal finestrino: " + w.name, "Leggi", () => go("#/" + ex.id + "/finestrino/" + i), 15000);
       }
     });
@@ -136,28 +137,50 @@ let wl = null;
 async function wakeLock(on) { try { if (on && "wakeLock" in navigator && !wl) { wl = await navigator.wakeLock.request("screen"); wl.addEventListener("release", () => { wl = null; }); } else if (!on && wl) { await wl.release(); wl = null; } } catch (e) {} }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (MapCtl.follow || busMode()) && !wl) wakeLock(true); });
 const vibrate = () => { try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch (e) {} };
-// segnale acustico generato con Web Audio: il contesto audio si sblocca al primo tocco sullo schermo, come richiesto dai browser
+// segnale acustico generato con Web Audio: il contesto audio si sblocca al primo tocco sullo schermo, come richiesto dai browser.
+// Toni fra 1 e 3 kHz, la banda in cui l'altoparlante del telefono rende di più; tre coppie «din-don» passano per un compressore che alza il volume percepito senza distorcere.
 const Chime = {
-  ctx: null,
-  unlock() { try { if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; this.ctx = new C(); } if (this.ctx.state !== "running") this.ctx.resume().catch(() => {}); } catch (e) {} },
+  ctx: null, comp: null,
+  unlock() { try { if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; this.ctx = new C(); } if (this.ctx.state !== "running") this.ctx.resume().then(() => SoundBar.check()).catch(() => {}); } catch (e) {} },
   ready() { return !!(this.ctx && this.ctx.state === "running"); },
   play() {
     try {
       this.unlock(); const c = this.ctx; if (!c) return false;
-      try { if (navigator.audioSession) navigator.audioSession.type = "transient"; } catch (e) {}
-      const t0 = c.currentTime + 0.06, out = c.createGain(); out.gain.value = 0.9; out.connect(c.destination);
-      [[880, 0], [1318.5, 0.16], [880, 0.62], [1318.5, 0.78]].forEach(([f, dt]) => {
-        const o = c.createOscillator(), g = c.createGain(); o.type = "sine"; o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(1, t0 + dt + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.45);
-        o.connect(g); g.connect(out); o.start(t0 + dt); o.stop(t0 + dt + 0.5);
-      });
+      // su iPhone la categoria «playback» fa suonare l'avviso anche con l'interruttore del silenzioso attivo
+      try { if (navigator.audioSession) { navigator.audioSession.type = "playback"; setTimeout(() => { try { navigator.audioSession.type = "auto"; } catch (e) {} }, 3000); } } catch (e) {}
+      if (!this.comp) { this.comp = c.createDynamicsCompressor(); this.comp.threshold.value = -18; this.comp.knee.value = 6; this.comp.ratio.value = 10; this.comp.attack.value = 0.002; this.comp.release.value = 0.15; const g = c.createGain(); g.gain.value = 1.6; this.comp.connect(g); g.connect(c.destination); }
+      const t0 = c.currentTime + 0.05;
+      [0, 0.75, 1.5].forEach(rep => [[1318.5, 0], [1046.5, 0.2]].forEach(([f, dt]) => {
+        const at = t0 + rep + dt, g = c.createGain();
+        g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.8, at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+        [[f, "triangle", 1], [f * 2, "sine", 0.35]].forEach(([fr, ty, lv]) => { const o = c.createOscillator(), og = c.createGain(); o.type = ty; o.frequency.value = fr; og.gain.value = lv; o.connect(og); og.connect(g); o.start(at); o.stop(at + 0.55); });
+        g.connect(this.comp);
+      }));
       return c.state === "running";
     } catch (e) { return false; }
   }
 };
+// notifica di sistema: suona con il volume delle notifiche, quindi si sente anche se il volume multimediale è basso
+const Notify = {
+  can() { return "Notification" in window && "serviceWorker" in navigator; },
+  ask() { try { if (this.can() && Notification.permission === "default") return Notification.requestPermission().then(() => SoundBar.check()); } catch (e) {} return Promise.resolve(); },
+  show(title, body, hash) {
+    try { if (!this.can() || Notification.permission !== "granted") return; navigator.serviceWorker.ready.then(reg => reg.showNotification(title, { body, tag: "pic-avviso", renotify: true, icon: "icons/icon-192.png", badge: "icons/icon-192.png", vibrate: [200, 100, 200, 100, 200], data: { hash } })).catch(() => {}); } catch (e) {}
+  }
+};
+// barra in alto: compare in modalità pullman quando il browser tiene ancora spento l'audio, e un tocco lo attiva
+const SoundBar = {
+  bar: null,
+  check() {
+    const need = busMode() && !Chime.ready();
+    if (need && !this.bar) { this.bar = el("button", { id: "sndbar", on: { click: () => { Chime.unlock(); Notify.ask(); setTimeout(() => { if (Chime.ready()) Chime.play(); this.check(); }, 250); } } }, "Tocca qui per attivare il suono degli avvisi del pullman"); document.body.append(this.bar); }
+    else if (!need && this.bar) { this.bar.remove(); this.bar = null; }
+  }
+};
 const busMode = () => store.get("bus", false);
-const alertUser = () => { vibrate(); if (busMode()) Chime.play(); };
+const alertUser = (title, body, hash) => { vibrate(); if (busMode()) { Chime.play(); Notify.show(title, body, hash); SoundBar.check(); } };
 ["pointerdown", "touchend", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (busMode() && !Chime.ready()) Chime.unlock(); }, true));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && busMode()) { Chime.unlock(); setTimeout(() => SoundBar.check(), 600); } });
 
 /* ------------------------------------------------------------------ router */
 const cur = { ex: null, page: "home", arg: null, exId: store.get("lastEx", null) };
@@ -268,9 +291,9 @@ function stopsView(ex) {
   const p = page(el("p", { cls: "lead" }, "Le soste della giornata e, in blu, le letture dal finestrino: brevi testi da leggere in pullman quando si attraversano i luoghi che descrivono."));
   const busTxt = el("div", { cls: "small muted" });
   const busBtn = el("button", { cls: "btn sm" });
-  const busTest = el("button", { cls: "btn sm", on: { click: () => { const ok = Chime.play(); vibrate(); if (!ok) setTimeout(() => { if (!Chime.ready()) toast("Il browser non ha ancora attivato l'audio: tocca di nuovo «Prova l'avviso»"); }, 400); } } }, "Prova l'avviso");
-  const busPaint = () => { const v = busMode(); busBtn.className = "btn sm " + (v ? "navy" : "primary"); busBtn.textContent = v ? "Disattiva" : "Attiva"; busTxt.textContent = v ? "Attiva. All'ingresso in un tratto con una lettura dal finestrino e all'arrivo a una tappa il telefono suona e vibra. Tieni l'app aperta in primo piano, lo schermo resta acceso; il suono segue il volume dei contenuti multimediali." : "Con la posizione attiva l'app avvisa con un suono e una vibrazione quando si entra in un tratto con una lettura dal finestrino o si arriva a una tappa."; busTest.style.display = v ? "" : "none"; };
-  busBtn.addEventListener("click", () => { const v = !busMode(); store.set("bus", v); if (v) { Chime.unlock(); Chime.play(); vibrate(); Geo.start(); wakeLock(true); } else if (!MapCtl.follow) wakeLock(false); busPaint(); });
+  const busTest = el("button", { cls: "btn sm", on: { click: () => { const ok = Chime.play(); vibrate(); Notify.ask().then(() => Notify.show("Prova dell'avviso", "Così suona l'avviso del pullman.", "#/" + ex.id + "/tappe")); if (!ok) setTimeout(() => { if (!Chime.ready()) toast("Il browser non ha ancora attivato l'audio, tocca di nuovo «Prova l'avviso»"); }, 400); } } }, "Prova l'avviso");
+  const busPaint = () => { const v = busMode(); busBtn.className = "btn sm " + (v ? "navy" : "primary"); busBtn.textContent = v ? "Disattiva" : "Attiva"; busTxt.textContent = v ? "Attiva. All'ingresso in un tratto con una lettura dal finestrino e all'arrivo a una tappa il telefono suona, vibra e mostra una notifica. Tieni l'app aperta in primo piano, perché con lo schermo spento o con un'altra app davanti il telefono smette di seguire la posizione; lo schermo resta acceso da solo. Il segnale suona due volte, con il volume dei contenuti multimediali e con quello delle notifiche: prova l'avviso e, se è debole, alza il volume con i tasti laterali mentre suona." : "Con la posizione attiva l'app avvisa con un suono e una vibrazione quando si entra in un tratto con una lettura dal finestrino o si arriva a una tappa."; busTest.style.display = v ? "" : "none"; };
+  busBtn.addEventListener("click", () => { const v = !busMode(); store.set("bus", v); if (v) { Chime.unlock(); Chime.play(); vibrate(); Notify.ask(); Geo.start(); wakeLock(true); } else if (!MapCtl.follow) wakeLock(false); busPaint(); SoundBar.check(); });
   busPaint();
   const busRow = el("div", { cls: "card" }, el("div", { cls: "row" }, el("div", { cls: "grow" }, el("b", null, "Modalità pullman")), busBtn), busTxt, el("div", { style: "margin-top:8px" }, busTest));
   p.append(busRow);
@@ -458,7 +481,7 @@ function compassView(ex, stopN) {
   const read = el("div", { style: "text-align:center;margin:-4px 0 10px" }); p.append(read);
   const tl = el("ul", { cls: "clean tlist" }); p.append(el("div", { cls: "card" }, tl));
   p.append(el("div", { cls: "box small" }, el("h4", null, "Come si usa"), "Tieni il telefono piatto davanti a te. La rosa ruota con la bussola e, quando il punto colorato di un bersaglio arriva sotto il triangolo rosso, il bersaglio è davanti a te. Se sei a più di tre chilometri dalla tappa gli azimut sono calcolati dal punto di sosta. Vicino a metalli e magneti, compreso l'interno del pullman, la bussola del telefono può sbagliare di parecchi gradi; per ricalibrarla muovi il telefono disegnando un otto."));
-  Geo.start();
+  Geo.start(); Geo.startCompass();
   const targets = stop.targets.map(k => ex.targets[k]).filter(Boolean);
   const NEAR = 3000, warn = { cls: "small", style: "color:var(--warn);margin:0 0 8px" };
   let from = stop.coords, key = "", rose = null, labels = [], rels = [], raf = 0, lastList = 0, shown = "";
@@ -1017,7 +1040,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.3.1";
+const VERSION = "1.3.2";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
@@ -1031,7 +1054,9 @@ if ("serviceWorker" in navigator) {
 }
 window.addEventListener("online", () => toast("Connessione ripristinata")); window.addEventListener("offline", () => toast("Sei senza rete; carte, figure e audio salvati restano disponibili"));
 applyPrefs(); Viewer.init(); render();
-if (busMode()) { Geo.start(); wakeLock(true); }
+if (busMode()) { Geo.start(); wakeLock(true); Chime.unlock(); setTimeout(() => SoundBar.check(), 1200); }
+// un tocco sulla notifica porta alla tappa o alla lettura corrispondente
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.go) go(e.data.go); });
 // se il permesso è già stato concesso in una sessione precedente, la posizione riparte da sola
 if (navigator.permissions && navigator.permissions.query) navigator.permissions.query({ name: "geolocation" }).then(p => { if (p.state === "granted" && store.get("geoAuto", true)) Geo.start(); }).catch(() => {});
 })();
