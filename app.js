@@ -722,22 +722,45 @@ function sketchView(ex) {
   const end = () => { if (!drawing) return; drawing = false; saveDraft(false); };
   canvas.addEventListener("pointerup", end); canvas.addEventListener("pointercancel", end);
   // fotocamera dentro l'app: il telefono non passa all'app Fotocamera, quindi la pagina non viene ricaricata e la foto arriva sulla lavagna
-  const stopCam = () => { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; if (camEl) camEl.remove(); camEl = null; };
+  const stopCam = () => { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; if (camEl) camEl.remove(); camEl = null; window.removeEventListener("devicemotion", onMot, true); };
   const inpCam = el("input", { type: "file", accept: "image/*", capture: "environment", style: "display:none" });
   const inpGal = el("input", { type: "file", accept: "image/*", style: "display:none" });
+  const camAlt = el("button", { cls: "btn", style: "display:none", on: { click: () => inpCam.click() } }, "Foto con l'app Fotocamera");
   const decode = async f => {
     if (window.createImageBitmap) { try { const b = await createImageBitmap(f, { imageOrientation: "from-image" }); const c = toWork(b, b.width, b.height); if (b.close) b.close(); return c; } catch (err) {} }
     return new Promise((res, rej) => { const u = URL.createObjectURL(f); const im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(toWork(im, im.naturalWidth, im.naturalHeight)); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error("decode")); }; im.src = u; });
   };
   const onFile = async inp => { const f = inp.files && inp.files[0]; inp.value = ""; if (!f) return; try { setBg(await decode(f)); } catch (err) { toast("Questa immagine non si apre, prova con un'altra foto"); } };
   inpCam.addEventListener("change", () => onFile(inpCam)); inpGal.addEventListener("change", () => onFile(inpGal));
+  // rotazione di un quarto di giro della foto e dei tratti già disegnati (dir 1 = orario, -1 = antiorario)
+  const rot90 = (src, dir) => { const c = document.createElement("canvas"); c.width = src.height; c.height = src.width; const g = c.getContext("2d"); if (dir > 0) { g.translate(c.width, 0); g.rotate(Math.PI / 2); } else { g.translate(0, c.height); g.rotate(-Math.PI / 2); } g.drawImage(src, 0, 0); return c; };
+  const rotate = dir => { if (!bg) { toast("Prima scatta o scegli una foto"); return; } bg = rot90(bg, dir); strokes.forEach(s => { s.p = s.p.map(([x, y]) => dir > 0 ? [1 - y, x] : [y, 1 - x]); }); setSize(); redraw(); fit(); saveDraft(true); };
+  // gravità letta mentre la fotocamera è aperta: se lo schermo non ha seguito la rotazione (rotazione automatica spenta) la foto viene raddrizzata da sola
+  let grav = null; const onMot = e => { const g = e.accelerationIncludingGravity; if (g && g.x != null) grav = [g.x, g.y, g.z]; };
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const tiltTurn = () => {
+    if (!grav) return 0; const ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0; if (ang % 180 !== 0) return 0;
+    let [x, y, z] = grav; if (isIOS) { x = -x; y = -y; }
+    if (Math.abs(z) > 7 || Math.abs(x) < 1.6 * Math.abs(y)) return 0;
+    const t = x > 0 ? -1 : 1; return ang === 180 ? -t : t;
+  };
   const openCam = async () => {
     if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { inpCam.click(); return; }
+    // la scelta del file va aperta subito, dentro il tocco: dopo l'attesa della fotocamera il telefono la bloccherebbe
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } }); }
-    catch (err) { stream = null; toast("Fotocamera non disponibile, si apre la scelta della foto"); inpCam.click(); return; }
-    const video = el("video", { playsinline: "", autoplay: "", muted: "" }); video.muted = true; video.srcObject = stream;
-    const shoot = () => { if (!video.videoWidth) return; const c = toWork(video, video.videoWidth, video.videoHeight); stopCam(); setBg(c); };
-    camEl = el("div", { cls: "sk-cam" }, video, el("div", { cls: "bar" }, el("button", { cls: "btn", on: { click: stopCam } }, "Annulla"), el("button", { cls: "sk-shutter", "aria-label": "Scatta la foto", on: { click: shoot } }), el("button", { cls: "btn", on: { click: () => { stopCam(); inpGal.click(); } } }, "Galleria")));
+    catch (err) { stream = null; toast("Fotocamera non disponibile: tocca «Dalla galleria» o «Foto con l'app Fotocamera»", null, null, 6000); camAlt.style.display = ""; return; }
+    const video = el("video", { playsinline: "", autoplay: "", muted: "" }); video.muted = true; video.playsInline = true; video.srcObject = stream;
+    window.addEventListener("devicemotion", onMot, true);
+    const ready = () => new Promise(res => { if (video.videoWidth) return res(true); let n = 0; const iv = setInterval(() => { if (video.videoWidth || ++n > 40) { clearInterval(iv); res(!!video.videoWidth); } }, 50); });
+    let busy = false;
+    const shoot = async () => {
+      if (busy) return; busy = true; shut.classList.add("busy");
+      if (!(await ready())) { busy = false; shut.classList.remove("busy"); toast("La fotocamera non si è ancora avviata, riprova fra un istante"); video.play().catch(() => {}); return; }
+      let c = toWork(video, video.videoWidth, video.videoHeight); const t = tiltTurn(); if (t) c = rot90(c, t);
+      vibrate(); stopCam(); setBg(c); if (t) toast("Foto raddrizzata. Se è storta usa «Ruota»");
+    };
+    const shut = el("button", { cls: "sk-shutter", "aria-label": "Scatta la foto", on: { click: shoot } });
+    camEl = el("div", { cls: "sk-cam" }, video, el("div", { cls: "bar" }, el("button", { cls: "btn", on: { click: stopCam } }, "Annulla"), shut, el("button", { cls: "btn", on: { click: () => { stopCam(); inpGal.click(); } } }, "Galleria")));
     document.body.append(camEl); video.play().catch(() => {});
   };
   // strumenti
@@ -749,6 +772,8 @@ function sketchView(ex) {
   const acts = el("div", { cls: "sk-acts" },
     el("button", { cls: "btn sm", on: { click: () => { strokes.pop(); redraw(); saveDraft(false); } } }, "Annulla tratto"),
     el("button", { cls: "btn sm", on: { click: () => { strokes = []; redraw(); saveDraft(false); } } }, "Pulisci"),
+    el("button", { cls: "btn sm", "aria-label": "Ruota a sinistra", on: { click: () => rotate(-1) } }, "↺ Ruota"),
+    el("button", { cls: "btn sm", "aria-label": "Ruota a destra", on: { click: () => rotate(1) } }, "Ruota ↻"),
     thickBtn,
     el("button", { cls: "btn sm primary", on: { click: save } }, "Salva nel taccuino"),
     el("button", { cls: "btn sm sk-exit", on: { click: () => { suppress = matchMedia("(orientation: landscape)").matches; setFull(false); } } }, "Esci"));
@@ -756,6 +781,7 @@ function sketchView(ex) {
   const topBar = el("div", { cls: "row wrap sk-top" },
     el("button", { cls: "btn", on: { click: openCam }, html: SVG.cam + " Scatta foto" }),
     el("button", { cls: "btn", on: { click: () => inpGal.click() } }, "Dalla galleria"),
+    camAlt,
     el("button", { cls: "btn", on: { click: () => { setFull(true); const d = document.documentElement; if (d.requestFullscreen && !isStandalone()) d.requestFullscreen().catch(() => {}); } }, html: SVG.fit + " Schermo intero" }));
   host.append(topBar, stage, tools, inpCam, inpGal); p.append(host);
   // ripristino della bozza salvata
@@ -765,8 +791,9 @@ function sketchView(ex) {
   setSize(); redraw();
   const ro = window.ResizeObserver ? new ResizeObserver(refit) : null; if (ro) ro.observe(stage);
   window.addEventListener("resize", refit); window.addEventListener("orientationchange", refit);
+  if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", refit);
   setTimeout(fit, 30);
-  onLeave(() => { stopCam(); if (ro) ro.disconnect(); window.removeEventListener("resize", refit); window.removeEventListener("orientationchange", refit); document.body.classList.remove("sk-lock"); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); });
+  onLeave(() => { stopCam(); if (ro) ro.disconnect(); window.removeEventListener("resize", refit); window.removeEventListener("orientationchange", refit); if (screen.orientation && screen.orientation.removeEventListener) screen.orientation.removeEventListener("change", refit); document.body.classList.remove("sk-lock"); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); });
 }
 
 /* ------------------------------------------------------------------ taccuino (IndexedDB) */
@@ -1139,7 +1166,7 @@ function installView() {
 }
 
 /* ------------------------------------------------------------------ avvio */
-const VERSION = "1.3.5";
+const VERSION = "1.3.6";
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; });
 if ("serviceWorker" in navigator) {
